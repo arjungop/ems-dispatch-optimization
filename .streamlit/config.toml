@@ -1,0 +1,17 @@
+# Pinned so the app looks identical on any machine it is demonstrated from,
+# instead of inheriting whatever the presenting laptop's OS theme happens to be.
+# The palette is the light half of the token set in src/viz.py, so the Streamlit
+# chrome and every Plotly chart read as one system. Viewers can still switch
+# theme from the toolbar menu; the charts follow via viz.theme().
+
+[theme]
+base = "light"
+primaryColor = "#2a78d6"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f4f4f1"
+textColor = "#0b0b0b"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = true

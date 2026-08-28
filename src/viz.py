@@ -1,0 +1,637 @@
+"""Visual decision support -- Plotly charts and Folium maps.
+
+Colour policy (kept in one place so every figure reads as one system):
+
+  * Categorical identity uses a fixed slot order -- blue, orange, aqua -- never
+    cycled. Slot 1 is always "our optimised result", slot 2 always "the
+    existing/benchmark result", so a colour means the same thing on every chart.
+  * Magnitude uses a single-hue light->dark blue ramp (never a rainbow).
+  * Covered/uncovered is a reserved status pair and always ships with a label,
+    never colour alone.
+
+Every chart is paired with its underlying table in the app, which satisfies the
+contrast-relief requirement for the lighter slots.
+"""
+
+from __future__ import annotations
+
+import branca.colormap as cm
+import folium
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+from folium.plugins import HeatMap, MarkerCluster
+
+# --- categorical slots (fixed order) ---------------------------------------
+SERIES = {
+    "light": {1: "#2a78d6", 2: "#eb6834", 3: "#1baf7a"},
+    "dark": {1: "#3987e5", 2: "#d95926", 3: "#199e70"},
+}
+# --- reserved status colours -----------------------------------------------
+STATUS = {
+    "light": {"good": "#008300", "critical": "#e34948", "warning": "#eda100"},
+    "dark": {"good": "#008300", "critical": "#e66767", "warning": "#c98500"},
+}
+# --- single-hue sequential ramp (light -> dark blue), lightness monotone ----
+SEQ_BLUE = ["#e8f1fb", "#c3dbf4", "#98c0ec", "#6aa2e0", "#3f85d3",
+            "#2a78d6", "#1d5da6", "#133f73"]
+
+INK = {
+    "light": {"primary": "#0b0b0b", "secondary": "#52514e", "muted": "#8a8985",
+              "grid": "#e4e3df", "surface": "#fcfcfb"},
+    "dark": {"primary": "#ffffff", "secondary": "#c3c2b7", "muted": "#8f8e86",
+             "grid": "#33322f", "surface": "#1a1a19"},
+}
+
+
+def theme() -> str:
+    """Which mode the viewer is in, so figures are selected rather than flipped."""
+    try:
+        t = getattr(getattr(st, "context", None), "theme", None)
+        if t is not None and getattr(t, "type", None) in ("light", "dark"):
+            return t.type
+    except Exception:  # pragma: no cover - Streamlit version differences
+        pass
+    try:
+        base = st.get_option("theme.base")
+        if base in ("light", "dark"):
+            return base
+    except Exception:  # pragma: no cover
+        pass
+    return "light"
+
+
+def tokens() -> tuple[dict, dict, dict]:
+    m = theme()
+    return SERIES[m], STATUS[m], INK[m]
+
+
+def _style(fig: go.Figure, ink: dict, height: int = 340, showlegend: bool = False) -> go.Figure:
+    """Recessive axes, transparent surface, text in ink tokens not series colour.
+
+    Margins are deliberately generous and ``automargin`` is on for both axes:
+    tick labels here are ZIP codes and thousands-separated counts, which a tight
+    margin silently clips rather than wrapping.
+    """
+    fig.update_layout(
+        height=height,
+        showlegend=showlegend,
+        margin=dict(l=64, r=28, t=52, b=56),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color=ink["secondary"], size=12),
+        title=dict(font=dict(color=ink["primary"], size=15), x=0, xanchor="left",
+                   y=0.97, yanchor="top"),
+        hoverlabel=dict(font_size=12),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0,
+                    font=dict(color=ink["secondary"])),
+    )
+    fig.update_xaxes(showgrid=False, zeroline=False, linecolor=ink["grid"],
+                     automargin=True, title_standoff=12,
+                     tickfont=dict(color=ink["secondary"]))
+    fig.update_yaxes(gridcolor=ink["grid"], zeroline=False, linecolor=ink["grid"],
+                     automargin=True, title_standoff=12,
+                     tickfont=dict(color=ink["secondary"]))
+    return fig
+
+
+def _lock_category_order(fig: go.Figure, order, axis: str = "y") -> go.Figure:
+    """Pin a categorical axis to the order the data was sorted into.
+
+    Plotly re-sorts string categories alphabetically by default, which silently
+    destroys a ranked bar chart. The order has to be stated explicitly.
+    """
+    kw = dict(type="category", categoryorder="array",
+              categoryarray=[str(v) for v in order])
+    return fig.update_yaxes(**kw) if axis == "y" else fig.update_xaxes(**kw)
+
+
+# ---------------------------------------------------------------------------
+# Step 1 -- statistics charts
+# ---------------------------------------------------------------------------
+
+def chart_busiest_zones(df: pd.DataFrame, top_n: int = 15) -> go.Figure:
+    """Magnitude by identity -> horizontal bars, sorted, directly labelled."""
+    s, _, ink = tokens()
+    d = df.head(top_n).iloc[::-1]
+    fig = go.Figure(go.Bar(
+        x=d["incidents"], y=d["zip_code"].astype(str), orientation="h",
+        marker=dict(color=s[1], line=dict(width=0)),
+        text=[f"{v:,}" for v in d["incidents"]],
+        textposition="outside", textfont=dict(color=ink["secondary"]),
+        hovertemplate="ZIP %{y}<br>%{x:,} incidents<extra></extra>",
+    ))
+    fig.update_traces(marker_cornerradius=4)
+    fig.update_layout(title=f"Busiest zones — top {top_n} by EMS incident count")
+    fig.update_xaxes(showgrid=True, gridcolor=ink["grid"], title="incidents")
+    fig.update_yaxes(showgrid=False, title=None)
+    _lock_category_order(fig, d["zip_code"])
+    return _style(fig, ink, height=max(340, 26 * len(d) + 110))
+
+
+def chart_calls_by_hour(df: pd.DataFrame) -> go.Figure:
+    """Ordered bins over the day -> bars; the peak bar is labelled."""
+    s, _, ink = tokens()
+    peak = int(df["incidents"].idxmax())
+    labels = ["" if i != peak else f"peak {df['incidents'].iloc[i]:,}" for i in range(len(df))]
+    fig = go.Figure(go.Bar(
+        x=df["hour"], y=df["incidents"], marker=dict(color=s[1], line=dict(width=0)),
+        text=labels, textposition="outside", textfont=dict(color=ink["secondary"]),
+        hovertemplate="%{x}:00–%{x}:59<br>%{y:,} incidents<extra></extra>",
+    ))
+    fig.update_traces(marker_cornerradius=4)
+    fig.update_layout(title="Peak timing — EMS calls by hour of day")
+    fig.update_xaxes(title="hour of day", dtick=2)
+    # Headroom for the "peak" label, which otherwise clips on the tallest bar.
+    fig.update_yaxes(title="incidents",
+                     range=[0, float(df["incidents"].max()) * 1.14])
+    return _style(fig, ink)
+
+
+def chart_calls_by_weekday(df: pd.DataFrame) -> go.Figure:
+    s, _, ink = tokens()
+    fig = go.Figure(go.Bar(
+        x=df["weekday"], y=df["incidents"], marker=dict(color=s[1], line=dict(width=0)),
+        hovertemplate="%{x}<br>%{y:,} incidents<extra></extra>",
+    ))
+    fig.update_traces(marker_cornerradius=4)
+    fig.update_layout(title="EMS calls by day of week")
+    fig.update_yaxes(title="incidents")
+    return _style(fig, ink)
+
+
+def chart_heatmap(pivot: pd.DataFrame) -> go.Figure:
+    """Magnitude across two categorical axes -> single-hue sequential cells."""
+    _, _, ink = tokens()
+    fig = go.Figure(go.Heatmap(
+        z=pivot.to_numpy(), x=[f"{h:02d}" for h in pivot.columns], y=list(pivot.index),
+        colorscale=[[i / (len(SEQ_BLUE) - 1), c] for i, c in enumerate(SEQ_BLUE)],
+        hovertemplate="%{y} %{x}:00<br>%{z:,} incidents<extra></extra>",
+        colorbar=dict(title=dict(text="calls", font=dict(color=ink["secondary"])),
+                      tickfont=dict(color=ink["secondary"]), thickness=12),
+        xgap=2, ygap=2,
+    ))
+    fig.update_layout(title="When load spikes — weekday × hour")
+    fig.update_xaxes(title="hour of day")
+    # Plotly draws row 0 at the bottom; reverse so the week reads Mon-first
+    # downwards, the way a calendar does.
+    fig.update_yaxes(autorange="reversed")
+    return _style(fig, ink, height=320)
+
+
+def chart_daily_trend(df: pd.DataFrame) -> go.Figure:
+    """Daily volume, with a truncated final day marked rather than dropped.
+
+    The feed is harvested mid-day, so the last day is a partial count. Drawn
+    plainly it looks like a collapse in demand, so the complete days carry the
+    solid line and the partial day is shown dashed and labelled.
+    """
+    s, _, ink = tokens()
+    partial = bool(df["partial"].iloc[-1]) if "partial" in df and len(df) else False
+    solid = df.iloc[:-1] if partial else df
+
+    fig = go.Figure(go.Scatter(
+        x=solid["date"], y=solid["incidents"], mode="lines",
+        line=dict(color=s[1], width=2), name="complete days",
+        hovertemplate="%{x|%d %b %Y}<br>%{y:,} incidents<extra></extra>",
+    ))
+    if partial and len(df) >= 2:
+        tail = df.iloc[-2:]
+        fig.add_trace(go.Scatter(
+            x=tail["date"], y=tail["incidents"], mode="lines+markers",
+            line=dict(color=ink["muted"], width=2, dash="dot"),
+            marker=dict(color=ink["muted"], size=6), name="partial day",
+            hovertemplate="%{x|%d %b %Y}<br>%{y:,} incidents "
+                          "(day still in progress)<extra></extra>",
+        ))
+        fig.add_annotation(
+            x=df["date"].iloc[-1], y=df["incidents"].iloc[-1],
+            text="final day partial", showarrow=True, arrowhead=0,
+            arrowcolor=ink["muted"], ax=-6, ay=-30, xanchor="right",
+            font=dict(color=ink["muted"], size=11),
+        )
+    fig.update_layout(title="Daily EMS incident volume", hovermode="x unified")
+    fig.update_yaxes(title="incidents")
+    return _style(fig, ink, height=280)
+
+
+def chart_call_types(df: pd.DataFrame) -> go.Figure:
+    s, _, ink = tokens()
+    d = df.iloc[::-1]
+    fig = go.Figure(go.Bar(
+        x=d["incidents"], y=d["type"], orientation="h",
+        marker=dict(color=s[1], line=dict(width=0)),
+        text=[f"{v:,}" for v in d["incidents"]], textposition="outside",
+        textfont=dict(color=ink["secondary"]),
+        hovertemplate="%{y}<br>%{x:,} incidents<extra></extra>",
+    ))
+    fig.update_traces(marker_cornerradius=4)
+    fig.update_layout(title="Which EMS call types make up demand")
+    fig.update_xaxes(showgrid=True, gridcolor=ink["grid"], title="incidents")
+    fig.update_yaxes(showgrid=False, title=None)
+    _lock_category_order(fig, d["type"])
+    return _style(fig, ink, height=max(340, 28 * len(d) + 110))
+
+
+# ---------------------------------------------------------------------------
+# Step 2 -- AHP
+# ---------------------------------------------------------------------------
+
+def chart_ahp_weights(weights: pd.Series) -> go.Figure:
+    s, _, ink = tokens()
+    d = weights.iloc[::-1]
+    fig = go.Figure(go.Bar(
+        x=d.to_numpy() * 100, y=list(d.index), orientation="h",
+        marker=dict(color=s[1], line=dict(width=0)),
+        text=[f"{v * 100:.1f}%" for v in d], textposition="outside",
+        textfont=dict(color=ink["secondary"]),
+        hovertemplate="%{y}<br>weight %{x:.1f}%<extra></extra>",
+    ))
+    fig.update_traces(marker_cornerradius=4)
+    fig.update_layout(title="Derived criterion weights")
+    fig.update_xaxes(showgrid=True, gridcolor=ink["grid"], title="weight (%)",
+                     range=[0, max(100.0, float(d.max() * 115))])
+    fig.update_yaxes(showgrid=False, title=None)
+    _lock_category_order(fig, d.index)
+    return _style(fig, ink, height=280)
+
+
+def chart_ahp_ranking(df: pd.DataFrame, top_n: int = 15) -> go.Figure:
+    s, _, ink = tokens()
+    d = df.head(top_n).iloc[::-1]
+    fig = go.Figure(go.Bar(
+        x=d["ahp_score"], y=d["zip_code"].astype(str), orientation="h",
+        marker=dict(color=s[1], line=dict(width=0)),
+        text=[f"{v:.3f}" for v in d["ahp_score"]], textposition="outside",
+        textfont=dict(color=ink["secondary"]),
+        hovertemplate="ZIP %{y}<br>AHP priority %{x:.3f}<extra></extra>",
+    ))
+    fig.update_traces(marker_cornerradius=4)
+    fig.update_layout(title=f"Candidate sites ranked by AHP priority — top {top_n}")
+    fig.update_xaxes(showgrid=True, gridcolor=ink["grid"], title="priority score")
+    fig.update_yaxes(showgrid=False, title=None)
+    _lock_category_order(fig, d["zip_code"])
+    return _style(fig, ink, height=max(340, 26 * len(d) + 110))
+
+
+# ---------------------------------------------------------------------------
+# Step 3 -- covering
+# ---------------------------------------------------------------------------
+
+def chart_threshold_stations(df: pd.DataFrame) -> go.Figure:
+    """Stations required at each response limit. One measure, one axis."""
+    s, _, ink = tokens()
+    fig = go.Figure(go.Bar(
+        x=[f"{t} min" for t in df["threshold_min"]], y=df["stations_required"],
+        marker=dict(color=s[1], line=dict(width=0)),
+        text=df["stations_required"], textposition="outside",
+        textfont=dict(color=ink["secondary"]),
+        hovertemplate="%{x} limit<br>%{y} stations required<extra></extra>",
+    ))
+    fig.update_traces(marker_cornerradius=4)
+    fig.update_layout(title="Stations needed for full coverage")
+    # Outside labels sit above the bar, and Plotly does not extend a vertical
+    # axis to fit them — without headroom the tallest bar's count is clipped.
+    fig.update_yaxes(title="stations",
+                     range=[0, float(df["stations_required"].max()) * 1.18])
+    return _style(fig, ink, height=300)
+
+
+def chart_threshold_coverage(df: pd.DataFrame) -> go.Figure:
+    """Demand covered at each limit -- a separate chart, never a second y-axis."""
+    s, _, ink = tokens()
+    fig = go.Figure(go.Bar(
+        x=[f"{t} min" for t in df["threshold_min"]], y=df["demand_covered_pct"],
+        marker=dict(color=s[1], line=dict(width=0)),
+        text=[f"{v:.1f}%" for v in df["demand_covered_pct"]], textposition="outside",
+        textfont=dict(color=ink["secondary"]),
+        hovertemplate="%{x} limit<br>%{y:.1f}% of demand covered<extra></extra>",
+    ))
+    fig.update_traces(marker_cornerradius=4)
+    fig.update_layout(title="Demand covered at that station count")
+    fig.update_yaxes(title="% of demand", range=[0, 108])
+    return _style(fig, ink, height=300)
+
+
+def chart_marginal_curve(df: pd.DataFrame) -> go.Figure:
+    s, _, ink = tokens()
+    fig = go.Figure(go.Scatter(
+        x=df["stations"], y=df["demand_covered_pct"], mode="lines+markers",
+        line=dict(color=s[1], width=2), marker=dict(size=8, color=s[1]),
+        hovertemplate="%{x} stations<br>%{y:.1f}% of demand covered<extra></extra>",
+    ))
+    fig.update_layout(title="Diminishing returns — coverage vs station budget",
+                      hovermode="x unified")
+    fig.update_xaxes(title="number of stations (P)", dtick=1)
+    fig.update_yaxes(title="% of demand covered", range=[0, 105])
+    return _style(fig, ink, height=320)
+
+
+def chart_comparison(rows: list[dict]) -> go.Figure:
+    """Our placement vs Seattle's real stations, at the same response limits.
+
+    Two series -> legend is always present; colour means the same thing it
+    means everywhere else in the app.
+    """
+    s, _, ink = tokens()
+    df = pd.DataFrame(rows)
+    fig = go.Figure()
+    for slot, name in ((1, "Optimised placement"), (2, "Seattle's real stations")):
+        d = df[df["plan"] == name]
+        fig.add_trace(go.Bar(
+            name=name, x=[f"{t} min" for t in d["threshold_min"]],
+            y=d["demand_covered_pct"], marker=dict(color=s[slot], line=dict(width=0)),
+            text=[f"{v:.1f}%" for v in d["demand_covered_pct"]],
+            textposition="outside", textfont=dict(color=ink["secondary"]),
+            hovertemplate=f"{name}<br>%{{x}} limit<br>%{{y:.1f}}% covered<extra></extra>",
+        ))
+    fig.update_traces(marker_cornerradius=4)
+    fig.update_layout(title="How our placement compares to Seattle's real stations",
+                      barmode="group", bargap=0.3, bargroupgap=0.06)
+    fig.update_yaxes(title="% of demand covered", range=[0, 112])
+    return _style(fig, ink, height=340, showlegend=True)
+
+
+# ---------------------------------------------------------------------------
+# Step 4 -- assignment
+# ---------------------------------------------------------------------------
+
+def chart_response_distribution(df: pd.DataFrame, threshold: float) -> go.Figure:
+    s, _, ink = tokens()
+    d = df[df["served"]]
+    fig = go.Figure(go.Histogram(
+        x=d["response_min"], nbinsx=20, marker=dict(color=s[1], line=dict(width=0)),
+        hovertemplate="%{x} min<br>%{y} incidents<extra></extra>",
+    ))
+    fig.add_vline(x=threshold, line_dash="dash", line_color=ink["muted"],
+                  annotation_text=f"{threshold:g}-min limit",
+                  annotation_font_color=ink["secondary"])
+    fig.update_layout(title="Response times under the optimised dispatch", bargap=0.06)
+    fig.update_xaxes(title="minutes to scene")
+    fig.update_yaxes(title="incidents")
+    return _style(fig, ink, height=300)
+
+
+def chart_dispatch_comparison(optimised: float, greedy: float) -> go.Figure:
+    """Total fleet travel time: the LP optimum vs nearest-unit-first dispatch."""
+    s, _, ink = tokens()
+    fig = go.Figure(go.Bar(
+        x=["Assignment LP (optimal)", "Nearest-unit-first (greedy)"],
+        y=[optimised, greedy],
+        marker=dict(color=[s[1], s[2]], line=dict(width=0)),
+        text=[f"{optimised:.1f} min", f"{greedy:.1f} min"], textposition="outside",
+        textfont=dict(color=ink["secondary"]),
+        hovertemplate="%{x}<br>%{y:.1f} total minutes<extra></extra>",
+    ))
+    fig.update_traces(marker_cornerradius=4)
+    fig.update_layout(title="Total fleet travel time for the hour")
+    fig.update_yaxes(title="total minutes", range=[0, max(optimised, greedy) * 1.2 or 1])
+    return _style(fig, ink, height=300)
+
+
+# ---------------------------------------------------------------------------
+# Maps
+# ---------------------------------------------------------------------------
+
+def _base_map(center=(47.6062, -122.3321), zoom: int = 11) -> folium.Map:
+    tiles = "CartoDB dark_matter" if theme() == "dark" else "CartoDB positron"
+    return folium.Map(location=list(center), zoom_start=zoom, tiles=tiles,
+                      control_scale=True)
+
+
+def map_demand(zones: pd.DataFrame, incidents: pd.DataFrame | None = None,
+               zip_geojson: dict | None = None) -> folium.Map:
+    """Where demand concentrates -- graduated circles on a single-hue ramp."""
+    m = _base_map()
+    if zones.empty:
+        return m
+
+    vmin, vmax = float(zones["demand"].min()), float(zones["demand"].max())
+    ramp = cm.LinearColormap(SEQ_BLUE, vmin=vmin, vmax=vmax, caption="EMS incidents per zone")
+
+    if zip_geojson:
+        lookup = dict(zip(zones["zip_code"].astype(str), zones["demand"]))
+        folium.GeoJson(
+            zip_geojson,
+            name="ZIP zones",
+            style_function=lambda f: {
+                "fillColor": ramp(lookup.get(str(f["properties"].get("ZCTA5")), vmin))
+                if str(f["properties"].get("ZCTA5")) in lookup else "#00000000",
+                "color": "#7a7a7a", "weight": 0.6,
+                "fillOpacity": 0.55 if str(f["properties"].get("ZCTA5")) in lookup else 0.0,
+            },
+            tooltip=folium.GeoJsonTooltip(fields=["ZCTA5"], aliases=["ZIP:"]),
+        ).add_to(m)
+
+    dmax = max(vmax, 1.0)
+    fg = folium.FeatureGroup(name="Zone demand")
+    for _, r in zones.iterrows():
+        folium.CircleMarker(
+            location=[r["latitude"], r["longitude"]],
+            radius=6 + 22 * (float(r["demand"]) / dmax) ** 0.5,
+            color="#ffffff", weight=1.5, fill=True,
+            fill_color=ramp(float(r["demand"])), fill_opacity=0.85,
+            tooltip=f"ZIP {r['zip_code']}: {int(r['demand']):,} EMS incidents",
+        ).add_to(fg)
+    fg.add_to(m)
+
+    if incidents is not None and len(incidents):
+        sample = incidents.sample(min(len(incidents), 4000), random_state=0)
+        HeatMap(sample[["latitude", "longitude"]].to_numpy().tolist(),
+                radius=11, blur=15, name="Incident heat", show=False).add_to(m)
+
+    ramp.add_to(m)
+    folium.LayerControl(collapsed=True).add_to(m)
+    return m
+
+
+def map_coverage(result, existing: pd.DataFrame | None = None,
+                 show_radius: bool = True, speed_kmh: float = 45.0,
+                 circuity: float = 1.30, turnout_min: float = 1.0) -> folium.Map:
+    """Chosen stations, their reach, and which zones end up covered."""
+    s, status, _ = tokens()
+    m = _base_map()
+    zt = result.zone_table
+
+    # Zones: covered vs not. Status colour always accompanied by a text label.
+    fg_z = folium.FeatureGroup(name="Demand zones")
+    dmax = max(float(zt["demand"].max()), 1.0)
+    for _, r in zt.iterrows():
+        col = status["good"] if r["covered"] else status["critical"]
+        label = "COVERED" if r["covered"] else "NOT COVERED"
+        folium.CircleMarker(
+            location=[r["latitude"], r["longitude"]],
+            radius=5 + 18 * (float(r["demand"]) / dmax) ** 0.5,
+            color="#ffffff", weight=1.2, fill=True, fill_color=col, fill_opacity=0.75,
+            tooltip=(f"ZIP {r['zip_code']} — {label}<br>"
+                     f"{int(r['demand']):,} incidents<br>"
+                     f"nearest station: {r['nearest_station_zone']} "
+                     f"({r['response_min']:.1f} min)"),
+        ).add_to(fg_z)
+    fg_z.add_to(m)
+
+    # Reach radius implied by the time limit under the current travel settings.
+    reach_km = max((result.threshold_min - turnout_min), 0) / 60.0 * speed_kmh / circuity
+
+    fg_s = folium.FeatureGroup(name="Optimised stations")
+    for _, r in result.chosen.iterrows():
+        folium.Marker(
+            location=[r["latitude"], r["longitude"]],
+            tooltip=f"{r.get('station', '')} — zone {r.get('zip_code', '')}",
+            icon=folium.Icon(color="blue", icon="plus-sign"),
+        ).add_to(fg_s)
+        if show_radius:
+            folium.Circle(
+                location=[r["latitude"], r["longitude"]], radius=reach_km * 1000,
+                color=s[1], weight=1.2, fill=True, fill_color=s[1], fill_opacity=0.08,
+                tooltip=f"{result.threshold_min:g}-min reach (~{reach_km:.1f} km)",
+            ).add_to(fg_s)
+    fg_s.add_to(m)
+
+    if existing is not None and len(existing):
+        fg_e = folium.FeatureGroup(name="Seattle's real stations", show=False)
+        cluster = MarkerCluster().add_to(fg_e)
+        for _, r in existing.iterrows():
+            folium.Marker(
+                location=[r["latitude"], r["longitude"]],
+                tooltip=f"{r.get('station_id', 'SFD')} — {r.get('address', '')}",
+                icon=folium.Icon(color="orange", icon="home"),
+            ).add_to(cluster)
+        fg_e.add_to(m)
+
+    folium.LayerControl(collapsed=False).add_to(m)
+    return m
+
+
+def map_dispatch(result, ambulances: pd.DataFrame) -> folium.Map:
+    """Which unit was sent where, drawn as base -> incident lines."""
+    s, status, _ = tokens()
+    m = _base_map(zoom=12)
+
+    fg_b = folium.FeatureGroup(name="Ambulance bases")
+    for _, r in ambulances.iterrows():
+        folium.Marker(
+            location=[r["latitude"], r["longitude"]],
+            tooltip=f"Unit {r.get('station', '')} — base zone {r.get('zip_code', '')}",
+            icon=folium.Icon(color="blue", icon="plus-sign"),
+        ).add_to(fg_b)
+    fg_b.add_to(m)
+
+    fg_i = folium.FeatureGroup(name="Incidents & dispatch")
+    for _, r in result.assignments.iterrows():
+        served = bool(r["served"])
+        col = status["good"] if served else status["critical"]
+        tip = (f"{r['incident_number']} — {r['type']}<br>{r['address']}<br>"
+               + (f"unit {r['ambulance']} · {r['response_min']:.1f} min"
+                  if served else "UNSERVED — no unit available"))
+        folium.CircleMarker(
+            location=[r["latitude"], r["longitude"]], radius=7,
+            color="#ffffff", weight=1.5, fill=True, fill_color=col,
+            fill_opacity=0.9, tooltip=tip,
+        ).add_to(fg_i)
+        if served and not np.isnan(r["base_lat"]):
+            folium.PolyLine(
+                locations=[[r["base_lat"], r["base_lon"]], [r["latitude"], r["longitude"]]],
+                color=s[1], weight=2, opacity=0.65,
+                tooltip=f"{r['ambulance']} → {r['incident_number']} ({r['response_min']:.1f} min)",
+            ).add_to(fg_i)
+    fg_i.add_to(m)
+
+    folium.LayerControl(collapsed=True).add_to(m)
+    return m
+
+
+# ---------------------------------------------------------------------------
+# Methodology flow diagram
+# ---------------------------------------------------------------------------
+
+def flow_diagram() -> str:
+    """The methodology slide, drawn rather than printed.
+
+    Renders the deck's pipeline sentence -- data in, clean & compute stats, AHP
+    ranks sites, two optimizations run, results on the map -- as an inline SVG.
+    It is drawn from the same ink/series tokens as every chart, so it reads as
+    part of the same system, and the covering -> assignment link is shown
+    explicitly because that linkage is the project's stated core contribution.
+    """
+    s, _status, ink = tokens()
+    FONT = "'Source Sans Pro', -apple-system, BlinkMacSystemFont, system-ui, sans-serif"
+    accent, edge, surf = s[1], ink["grid"], ink["surface"]
+
+    def box(x, y, w, h, eyebrow, title, strong=False):
+        stroke = accent if strong else edge
+        fill = f"{accent}14" if strong else surf
+        return (
+            f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="10" '
+            f'fill="{fill}" stroke="{stroke}" stroke-width="{2 if strong else 1.25}"/>'
+            f'<text x="{x + w / 2}" y="{y + (22 if h < 60 else 27)}" text-anchor="middle" '
+            f'font-family="{FONT}" font-size="10.5" font-weight="700" '
+            f'letter-spacing="0.09em" fill="{ink["muted"]}">{eyebrow}</text>'
+            f'<text x="{x + w / 2}" y="{y + (42 if h < 60 else 52)}" text-anchor="middle" '
+            f'font-family="{FONT}" font-size="14.5" font-weight="600" '
+            f'fill="{ink["primary"]}">{title}</text>'
+        )
+
+    p = [
+        '<svg viewBox="0 0 1182 196" width="100%" role="img" '
+        'aria-label="Pipeline: Seattle 911 data in, clean and compute statistics, '
+        'AHP ranks sites, covering and assignment optimizations run, results on the map." '
+        'xmlns="http://www.w3.org/2000/svg">',
+        f'<defs><marker id="fa" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" '
+        f'orient="auto"><path d="M0,0 L7.5,3.2 L0,6.4 z" fill="{ink["muted"]}"/></marker>'
+        f'<marker id="fb" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" '
+        f'orient="auto"><path d="M0,0 L7.5,3.2 L0,6.4 z" fill="{accent}"/></marker></defs>',
+    ]
+
+    # Stages 1-3 and 5 sit on the spine; stage 4 splits into the two models.
+    p.append(box(10, 64, 186, 72, "DATA IN", "Seattle 911 feed"))
+    p.append(box(238, 64, 186, 72, "STEP 1", "Clean &amp; compute stats"))
+    p.append(box(466, 64, 186, 72, "STEP 2", "AHP ranks sites"))
+    p.append(box(694, 29, 250, 54, "STEP 3 · ILP", "Covering model", strong=True))
+    p.append(box(694, 117, 250, 54, "STEP 4 · LP", "Assignment model", strong=True))
+    p.append(box(986, 64, 186, 72, "OUTPUT", "Results on the map"))
+
+    def arrow(x1, x2, y=100):
+        return (f'<line x1="{x1}" y1="{y}" x2="{x2}" y2="{y}" stroke="{ink["muted"]}" '
+                f'stroke-width="1.5" marker-end="url(#fa)"/>')
+
+    p.append(arrow(200, 232))
+    p.append(arrow(428, 460))
+    # Fork from AHP into the covering model, which is what consumes the ranking.
+    p.append(f'<path d="M656,100 H676 V56 H{694 - 10}" fill="none" '
+             f'stroke="{ink["muted"]}" stroke-width="1.5" marker-end="url(#fa)"/>')
+    # The core contribution: covering output becomes the assignment model's bases.
+    p.append(f'<path d="M760,83 V{117 - 10}" fill="none" stroke="{accent}" '
+             f'stroke-width="2" marker-end="url(#fb)"/>')
+    p.append(f'<text x="774" y="105" font-family="{FONT}" font-size="11" '
+             f'font-style="italic" fill="{accent}">stations become ambulance bases</text>')
+    # Both models merge into the map.
+    p.append(f'<path d="M944,56 H966 V100 H{986 - 10}" fill="none" '
+             f'stroke="{ink["muted"]}" stroke-width="1.5" marker-end="url(#fa)"/>')
+    p.append(f'<path d="M944,144 H966 V100" fill="none" '
+             f'stroke="{ink["muted"]}" stroke-width="1.5"/>')
+
+    p.append("</svg>")
+    return "".join(p)
+
+
+def team_strip(course: str, members: list[tuple[str, str]]) -> str:
+    """The deck's 'presented by' row, in the app's own tokens."""
+    _s, _status, ink = tokens()
+    FONT = "'Source Sans Pro', -apple-system, BlinkMacSystemFont, system-ui, sans-serif"
+    cells = "".join(
+        f'<div style="flex:1 1 180px;min-width:0">'
+        f'<div style="font-family:{FONT};font-size:14.5px;font-weight:600;'
+        f'color:{ink["primary"]}">{name}</div>'
+        f'<div style="font-family:{FONT};font-size:12px;color:{ink["muted"]};'
+        f'letter-spacing:0.03em">{roll}</div></div>'
+        for name, roll in members
+    )
+    return (
+        f'<div style="border-top:1px solid {ink["grid"]};margin-top:8px;padding-top:14px">'
+        f'<div style="font-family:{FONT};font-size:10.5px;font-weight:700;'
+        f'letter-spacing:0.09em;color:{ink["muted"]};margin-bottom:10px">'
+        f'PRESENTED BY · {course.upper()}</div>'
+        f'<div style="display:flex;flex-wrap:wrap;gap:18px 24px">{cells}</div></div>'
+    )

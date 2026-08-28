@@ -1,0 +1,28 @@
+# Source data is downloaded, not committed: the raw 911 CSV is ~191 MB, which is
+# over GitHub's 100 MB hard limit, and the Parquet cache is ~58 MB. Both are
+# reproducible with `python scripts/download_data.py && python scripts/preprocess.py`.
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Generated preview page (scripts/render_charts.py)
+charts_preview.html
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Agent-skill symlinks Streamlit drops into the project; they point into the
+# local site-packages install and are meaningless outside this machine.
+.agents/
+.claude/
