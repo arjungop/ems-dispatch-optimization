@@ -32,8 +32,8 @@ Headline results over the last 12 months (79,152 EMS incidents, 28 demand zones)
 
 - **7 stations** give 100% coverage at an 8-minute limit — against Seattle's 36 real stations,
   because placement follows demand rather than history.
-- The assignment LP cuts total fleet travel time **41%** versus nearest-unit-first greedy
-  dispatch on the busiest hour in the period.
+- The assignment LP cuts total fleet travel time **8.2%** versus nearest-unit-first greedy
+  dispatch on the busiest hour in the period, measured over the same calls on both sides.
 - Every model is verified on the real data, including a cross-check of the LP against an
   independent Hungarian-algorithm solution.
 
@@ -51,6 +51,17 @@ python scripts/download_data.py    # ~2.2M real 911 records + stations + ZIP pol
 python scripts/preprocess.py       # clean, EMS-filter, tag ZIP zones, cache to Parquet
 streamlit run app.py
 ```
+
+### Solvers
+
+The models are written with PuLP, which bundles a CBC binary built for x86_64
+only — on Apple Silicon without Rosetta every solve fails with *"Bad CPU type in
+executable"*. `requirements.txt` therefore also installs **HiGHS**, a native
+wheel that works on every current platform. `config.get_solver()` probes the
+available solvers once, by actually solving a trivial LP, and uses the first
+that runs: HiGHS, then a system CBC on `PATH` (`brew install cbc`), then PuLP's
+bundled copy. Nothing needs configuring — but if you ever want to know which one
+is in play, `config.solver_name()` will tell you.
 
 The download pages the full dataset from the open-data portal and takes roughly
 20–25 minutes; preprocessing takes a couple of minutes. Both are one-time costs —
@@ -128,6 +139,19 @@ matrices are combined with the element-wise **geometric mean** — the only aver
 keeps the matrix reciprocal, so if members' views of A-vs-B average to 3, their view of
 B-vs-A automatically averages to 1/3.
 
+The four members' own ratings are recorded in `TEAM_JUDGEMENTS` in
+`src/config.py` — the single place they live, so the app, the chart renderer and
+the verification suite cannot drift apart. Every member's matrix is internally
+consistent (**CR = 0.000** for all four, and for the aggregate), which is a
+property of the ratings rather than luck: each member's density-vs-coverage
+rating is exactly the product of their other two, so the judgements contain no
+contradiction for the consistency check to find.
+
+The combined weights are **Incident Density 67.4%, Equity Gap 23.1%, Coverage
+Potential 9.4%** — the team weights raw call volume well above the other two,
+and rates the ability to blanket several zones from one site as the least
+important of the three.
+
 ### Step 3 — Optimization 1: Covering model, ILP (`src/covering.py`)
 
 A zone is *covered* if a station can reach it within the response-time limit.
@@ -173,8 +197,15 @@ rows or columns so the problem is balanced and always feasible.
 
 **The connecting idea:** the station locations determined by the covering model serve as
 the ambulance bases in the assignment model. This linkage integrates both optimizations
-into a single, coherent framework — the core contribution of the project. The app also
-reports how much the optimal plan beats nearest-unit-first greedy dispatch.
+into a single, coherent framework — the core contribution of the project.
+
+The app also reports how much the optimal plan beats nearest-unit-first greedy
+dispatch. Because a peak hour normally carries more calls than ready units, and
+an unserved call is free in the objective, that comparison is deliberately
+restricted to the same workload on both sides — the first *k* calls by arrival,
+*k* being the fleet size — so the gap measures matching quality rather than
+which calls each method chose to answer (`benchmark_vs_greedy` in
+`src/assignment.py`).
 
 ### Travel-time model (`src/geo.py`)
 
@@ -215,8 +246,8 @@ data/
 ## Verification
 
 ```bash
-python scripts/verify_pipeline.py   # 53 checks — every model, on the real data
-python scripts/test_app.py          # 33 checks — drives the app headlessly
+python scripts/verify_pipeline.py   # 59 checks — every model, on the real data
+python scripts/test_app.py          # 37 checks — drives the app headlessly
 ```
 
 `test_app.py` also checks the presentation layer — that the methodology diagram
@@ -231,8 +262,18 @@ it runs: set covering must reach full coverage of every reachable zone; maximal
 covering must open exactly P and be non-decreasing in P; MCLP at P = the
 set-cover optimum must reach the same coverage; a looser response limit must
 never require more stations; AHP weights must sum to 1 with λmax ≥ n and CR <
-0.1; and the assignment LP is cross-checked against an independent Hungarian-algorithm
-solution of the same balanced matrix. Both suites currently pass in full.
+0.1; the greedy benchmark must put the same workload on both sides and the LP
+must never lose to it; and the assignment LP is cross-checked against an
+independent Hungarian-algorithm solution of the same balanced matrix.
+
+Beyond those properties, a final section proves optimality outright: both
+covering models are re-solved on small synthetic cities and checked against an
+exhaustive enumeration of every possible station subset, the AHP weights are
+checked against the largest-modulus eigenvector on 200 random reciprocal
+matrices, and the dispatch LP is checked against greedy on 150 random cost
+matrices. A solver swap or a drift in how a model is stated therefore cannot
+pass unnoticed. Both suites currently pass in full — 59 and 37 checks, 0
+failures.
 
 ### Results on the real data
 
@@ -249,8 +290,21 @@ The optimised plan reaches comparable coverage from far fewer sites because it i
 placed against demand rather than accumulated historically — and because the real
 network also serves fire suppression, which this EMS-only model does not price in.
 On the busiest hour in the period (Wed 19 Nov 2025, 09:00, 30 simultaneous
-incidents) the assignment LP cut total fleet travel time by **41%** against
-nearest-unit-first greedy dispatch.
+incidents) the assignment LP beat nearest-unit-first greedy dispatch on total
+fleet travel time:
+
+| Ready units | Fleet | Optimal | Greedy | LP better by |
+|---|---|---|---|---|
+| 1 per station | 7 units | 74.40 min | 81.00 min | **8.2%** |
+| 2 per station | 14 units | 143.96 min | 149.91 min | **4.0%** |
+
+Both sides are measured over the same calls — the first *k* to arrive, where *k*
+is the fleet size. That restriction matters: a peak hour has more calls than
+units, and unserved calls cost nothing in the objective, so an unrestricted LP
+would quietly answer only the *nearest* calls while greedy took them as they
+came. Comparing those totals would score triage rather than routing and inflate
+the LP's margin several-fold (to 62% and 40% respectively). The figures above
+are the honest routing gain.
 
 ### A note on fringe zones
 
@@ -264,7 +318,7 @@ models while keeping them visible in the tables. It retains 99.8% of all demand.
 
 ## Tools & tech stack
 
-**Python + pandas** loading data & computing statistics · **PuLP** solving the covering
-(ILP) & assignment (LP) models · **Streamlit** the interactive user interface ·
+**Python + pandas** loading data & computing statistics · **PuLP + HiGHS** modelling and
+solving the covering (ILP) & assignment (LP) models · **Streamlit** the interactive user interface ·
 **Folium / Plotly** mapping incidents & stations · **Haversine** estimating travel
 distance / time · **Data ingestion** export CSV from portal / API into the app.

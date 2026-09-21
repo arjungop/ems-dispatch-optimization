@@ -190,6 +190,58 @@ check("changing the response-time limit works", not at.exception,
 at.sidebar.selectbox[0].set_value("Entire dataset").run()
 check("entire-dataset period works", not at.exception, "; ".join(exceptions(at)))
 
+# --- regressions caught during the end-to-end audit --------------------
+print("\n   regression checks…")
+import re  # noqa: E402
+
+# Reset to the default period before the consistency checks below.
+at.sidebar.selectbox[0].set_value("Last 12 months").run()
+at.sidebar.toggle[0].set_value(False).run()
+
+# The header and the Data tab must agree on how many zones the models plan
+# around. They once disagreed (39 vs 28) because one counted every ZIP in the
+# feed and the other counted only the material ones.
+agree = True
+for floor in (0.0, 0.5, 1.0):
+    next(sl for sl in at.sidebar.slider if "materiality" in sl.label).set_value(floor).run()
+    hdr = next((c.value for c in at.caption if "demand zones" in str(c.value)), "")
+    m = re.search(r"\*\*(\d+)\*\* demand zones", hdr)
+    kpi = next((x.value for x in at.metric if x.label == "Demand zones"), None)
+    if not m or str(kpi) != m.group(1):
+        agree = False
+check("header and Data tab agree on the zone count", agree,
+      "checked at three materiality floors")
+
+# Pulling the candidate pool to its floor must not break the budget slider:
+# its default once sat above a max that shrinks with the pool.
+next(sl for sl in at.sidebar.slider if "materiality" in sl.label).set_value(0.1).run()
+pool = next((sl for sl in at.slider if "Candidate sites" in sl.label), None)
+if pool:
+    pool.set_value(int(pool.min)).run()
+    check("smallest candidate pool renders", not at.exception, "; ".join(exceptions(at)))
+    mode_r = next((r for r in at.radio if any("Mode A" in str(o) for o in r.options)), None)
+    if mode_r:
+        mode_r.set_value(next(o for o in mode_r.options if "Mode B" in str(o))).run()
+        check("budget slider survives the smallest pool", not at.exception,
+              "; ".join(exceptions(at)))
+        mode_r = next(r for r in at.radio if any("Mode A" in str(o) for o in r.options))
+        mode_r.set_value(next(o for o in mode_r.options if "Mode A" in str(o))).run()
+    pool = next(sl for sl in at.slider if "Candidate sites" in sl.label)
+    pool.set_value(int(pool.max)).run()
+
+# Every Decision Map layer must render -- it is the deck's fourth objective.
+layers_ok = True
+dm = next((r for r in at.radio if any("Demand by zone" in str(o) for o in r.options)), None)
+if dm is None:
+    layers_ok = False
+else:
+    for layer in list(dm.options):
+        r = next(x for x in at.radio if any("Demand by zone" in str(o) for o in x.options))
+        r.set_value(layer).run()
+        if at.exception:
+            layers_ok = False
+check("all Decision Map layers render", layers_ok, "demand, placement, dispatch")
+
 print("\n" + "=" * 72)
 print(f"   {passed} passed, {failed} failed")
 print("=" * 72)

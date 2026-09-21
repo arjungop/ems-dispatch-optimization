@@ -9,6 +9,7 @@ Run:  python scripts/verify_pipeline.py
 
 from __future__ import annotations
 
+import itertools
 import sys
 import time
 from pathlib import Path
@@ -110,12 +111,11 @@ check("heatmap sums to the total",
 # ---------------------------------------------------------------------------
 section("STEP 2 — AHP multi-criteria site scoring")
 # ---------------------------------------------------------------------------
-members = [
-    {(0, 1): 3.0, (0, 2): 5.0, (1, 2): 2.0},
-    {(0, 1): 2.0, (0, 2): 4.0, (1, 2): 2.0},
-    {(0, 1): 3.0, (0, 2): 5.0, (1, 2): 3.0},
-    {(0, 1): 4.0, (0, 2): 6.0, (1, 2): 2.0},
-]
+# The judgements under test are the ones the app actually uses, not a private
+# fixture -- otherwise the suite could pass on numbers nobody ever sees.
+members = [config.judgements_for(name) for name, _ in config.TEAM]
+print(f"   judgements: {'the team\'s own' if config.JUDGEMENTS_ARE_REAL else 'PLACEHOLDER'}"
+      f" ({len(members)} members)")
 res_ahp = ahp_mod.run_ahp(members)
 d = res_ahp.diagnostics
 print("   weights: " + ", ".join(f"{c} {w * 100:.1f}%"
@@ -153,6 +153,7 @@ section("STEP 3 — Optimisation 1: Covering model (ILP)")
 candidates = scored[["zip_code", "latitude", "longitude"]].copy()
 cand_ahp = scored["ahp_score"].to_numpy()
 
+print(f"   solver in use: {config.solver_name()}")
 print("   Mode A — Set Covering")
 cov = covering.solve_set_covering(candidates, zones, 8, cand_ahp, TK)
 print(f"     status {cov.status}: {cov.n_stations} stations cover "
@@ -232,7 +233,8 @@ for units in (1, 2):
           f"mean {a.mean_time_min:.2f} min, worst {a.max_time_min:.2f} min "
           f"({a.solve_seconds:.2f}s)")
     print(f"     served {a.n_served}, unserved {a.n_unserved}, idle {a.n_idle}")
-    print(f"     greedy nearest-unit-first would take {a.greedy_total_min:.2f} min "
+    print(f"     like-for-like over the first {a.benchmark_n_incidents} calls: "
+          f"optimal {a.benchmark_lp_min:.2f} min vs greedy {a.greedy_total_min:.2f} min "
           f"-> LP is {a.improvement_pct:.2f}% better")
 
     check(f"[{units}/station] LP solved to optimality", a.status == "Optimal")
@@ -243,7 +245,10 @@ for units in (1, 2):
     check(f"[{units}/station] serves min(units, incidents)",
           a.n_served == min(len(amb), len(hour_inc)))
     check(f"[{units}/station] LP is never worse than greedy",
-          a.total_time_min <= a.greedy_total_min + 1e-9)
+          a.benchmark_lp_min <= a.greedy_total_min + 1e-9)
+    check(f"[{units}/station] benchmark compares equal workloads",
+          a.benchmark_n_incidents == min(len(amb), len(hour_inc)),
+          f"{a.benchmark_n_incidents} calls on both sides")
     check(f"[{units}/station] all response times positive",
           bool((a.assignments.loc[a.assignments['served'], 'response_min'] > 0).all()))
 
@@ -257,6 +262,90 @@ for units in (1, 2):
               f"{a.total_time_min:.6f} vs {bal[ri, ci].sum():.6f}")
     except ImportError:
         print("     (scipy not available — skipped Hungarian cross-check)")
+
+# ---------------------------------------------------------------------------
+section("STEP 5 — Optimality cross-checks against brute force")
+# ---------------------------------------------------------------------------
+# Everything above asserts the properties each model must satisfy. These go
+# further and prove optimality outright, on instances small enough to enumerate
+# exhaustively -- so a silent solver swap, or a drift in how a model is stated,
+# cannot slip through looking plausible.
+rng = np.random.default_rng(20260921)
+
+
+def _synthetic(n: int) -> pd.DataFrame:
+    """A small random city: n candidate sites that are also the demand zones."""
+    return pd.DataFrame({
+        "zip_code": [f"Z{i}" for i in range(n)],
+        "latitude": 47.6 + rng.uniform(-0.10, 0.10, n),
+        "longitude": -122.33 + rng.uniform(-0.10, 0.10, n),
+        "demand": rng.integers(1, 500, n).astype(float),
+    })
+
+
+lscp_bad = mclp_bad = lscp_n = mclp_n = 0
+for _ in range(25):
+    zs = _synthetic(int(rng.integers(4, 8)))
+    cs = zs[["zip_code", "latitude", "longitude"]].copy()
+    thr = float(rng.choice([3.0, 4.0, 5.0, 6.0]))
+    amat, _ = covering.coverage_matrix(cs, zs, thr, **TK)
+    need = np.where(amat.any(axis=0))[0]
+    if not len(need):
+        continue
+    sites = range(len(cs))
+
+    # Mode A: the smallest subset of sites that covers every reachable zone.
+    best_k = next(
+        k for k in range(1, len(cs) + 1)
+        if any(all(amat[list(combo), j].any() for j in need)
+               for combo in itertools.combinations(sites, k))
+    )
+    lscp_n += 1
+    if covering.solve_set_covering(cs, zs, thr, None, TK).n_stations != best_k:
+        lscp_bad += 1
+
+    # Mode B: the most demand any P sites can reach.
+    p = int(rng.integers(1, len(cs) + 1))
+    dem = zs["demand"].to_numpy(dtype=float)
+    best_d = max(
+        sum(dem[j] for j in range(len(zs)) if amat[list(combo), j].any())
+        for combo in itertools.combinations(sites, p)
+    )
+    mclp_n += 1
+    if abs(covering.solve_maximal_covering(cs, zs, thr, p, TK).demand_covered - best_d) > 1e-6:
+        mclp_bad += 1
+
+check("set covering is provably optimal", lscp_bad == 0,
+      f"matched brute force on {lscp_n} fully-enumerated instances")
+check("maximal covering is provably optimal", mclp_bad == 0,
+      f"matched brute force on {mclp_n} fully-enumerated instances")
+
+# AHP weights must be the principal eigenvector -- the largest-modulus one,
+# which is what Perron-Frobenius guarantees exists for a positive matrix.
+eig_bad = 0
+for _ in range(200):
+    k = int(rng.integers(3, 7))
+    mat = np.ones((k, k))
+    for i in range(k):
+        for j in range(i + 1, k):
+            v = float(rng.choice([1 / 9, 1 / 7, 1 / 5, 1 / 3, 1, 3, 5, 7, 9]))
+            mat[i, j], mat[j, i] = v, 1.0 / v
+    vals, vecs = np.linalg.eig(mat)
+    ref = np.abs(vecs[:, int(np.argmax(np.abs(vals)))].real)
+    if not np.allclose(ahp_mod.priority_vector(mat), ref / ref.sum(), atol=1e-8):
+        eig_bad += 1
+check("AHP weights are the principal eigenvector", eig_bad == 0,
+      "matched the largest-modulus eigenvector on 200 random matrices")
+
+# On an equal workload the optimal assignment can never lose to greedy.
+lp_lost = 0
+for _ in range(150):
+    cm = rng.uniform(0.5, 30.0, size=(int(rng.integers(1, 7)), int(rng.integers(1, 7))))
+    lp_t, gr_t, _ = asg.benchmark_vs_greedy(cm)
+    if lp_t > gr_t + 1e-7:
+        lp_lost += 1
+check("optimal dispatch never loses to greedy", lp_lost == 0,
+      "over 150 random cost matrices")
 
 # ---------------------------------------------------------------------------
 section("RESULT")

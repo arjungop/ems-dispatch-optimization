@@ -101,13 +101,6 @@ class AHPResult:
     def weights_series(self) -> pd.Series:
         return pd.Series(self.weights, index=self.criteria, name="weight")
 
-    def weights_table(self) -> pd.DataFrame:
-        return pd.DataFrame({
-            "Criterion": self.criteria,
-            "Weight": self.weights,
-            "Weight %": 100.0 * self.weights,
-        })
-
     def matrix_frame(self) -> pd.DataFrame:
         return pd.DataFrame(self.matrix, index=self.criteria, columns=self.criteria)
 
@@ -214,18 +207,15 @@ def score_sites(
     return norm
 
 
-# PLACEHOLDER JUDGEMENTS -- not real team input.
+# LAST-RESORT FALLBACK -- not the team's judgements.
 #
-# The project calls for each member to fill the pairwise table independently and
-# for the results to be combined. These values are a defensible starting point
-# only, so the app has something coherent to open with: density judged
-# moderately-to-strongly more important than the equity gap, strongly more
-# important than raw coverage potential, equity slightly ahead of coverage
-# potential. They yield CR = 0.0032, comfortably inside the 0.1 limit.
-#
-# Replace them with the team's actual comparisons via the per-member tabs in
-# "2 - AHP Site Scoring"; the criterion weights, and therefore the site ranking
-# and the candidate pool handed to the covering model, all depend on them.
+# The team's actual pairwise ratings live in ``config.TEAM_JUDGEMENTS`` and are
+# what the app, the chart renderer and the verification suite all use. This
+# single set remains only so that ``run_ahp`` has something coherent to fall
+# back on if it is ever called without members -- for instance from a notebook
+# or a doctest. It is deliberately consistent (CR = 0.0032) so such a call
+# cannot fail the consistency check for reasons unrelated to what is being
+# tested.
 DEFAULT_COMPARISONS: dict[tuple[int, int], float] = {
     (0, 1): 3.0,
     (0, 2): 5.0,

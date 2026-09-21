@@ -43,10 +43,6 @@ class CoverageResult:
     def demand_pct(self) -> float:
         return 100.0 * self.demand_covered / self.demand_total if self.demand_total else 0.0
 
-    @property
-    def zone_pct(self) -> float:
-        return 100.0 * self.zones_covered / self.zones_total if self.zones_total else 0.0
-
 
 def coverage_matrix(
     candidates: pd.DataFrame,
@@ -145,7 +141,7 @@ def solve_set_covering(
             continue
         prob += pulp.lpSum(y[i] for i in range(n_c) if a[i, j]) >= 1, f"cover_{j}"
 
-    solver = pulp.PULP_CBC_CMD(msg=msg)
+    solver = config.get_solver(msg=msg)
     prob.solve(solver)
     status = pulp.LpStatus[prob.status]
 
@@ -191,7 +187,7 @@ def solve_maximal_covering(
         prob += z[j] <= (pulp.lpSum(covering) if covering else 0), f"link_{j}"
     prob += pulp.lpSum(y) == p, "station_budget"
 
-    prob.solve(pulp.PULP_CBC_CMD(msg=msg))
+    prob.solve(config.get_solver(msg=msg))
     status = pulp.LpStatus[prob.status]
 
     open_idx = [i for i in range(n_c) if y[i].value() is not None and y[i].value() > 0.5]

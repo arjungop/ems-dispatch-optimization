@@ -26,3 +26,6 @@ env/
 # local site-packages install and are meaningless outside this machine.
 .agents/
 .claude/
+
+# Serena's local symbol cache and project config — machine-specific.
+.serena/

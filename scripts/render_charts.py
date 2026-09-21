@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 
 from src import ahp as ahp_mod  # noqa: E402
 from src import assignment as asg  # noqa: E402
-from src import covering, data_loader, stats, viz  # noqa: E402
+from src import config, covering, data_loader, stats, viz  # noqa: E402
 
 TK = dict(speed_kmh=45.0, circuity=1.30, turnout_min=1.0)
 OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "charts_preview.html"
@@ -30,7 +30,7 @@ start = (pd.Timestamp(end) - pd.DateOffset(years=1)).date()
 sel = data_loader.filter_period(inc, start, end, False)
 zones = data_loader.material_zones(data_loader.build_zones(sel))
 
-ahp_res = ahp_mod.run_ahp([ahp_mod.DEFAULT_COMPARISONS])
+ahp_res = ahp_mod.run_ahp([config.judgements_for(n) for n, _ in config.TEAM])
 scored = ahp_mod.score_sites(zones, existing, ahp_res, 8, **TK)
 candidates = scored[["zip_code", "latitude", "longitude"]]
 cov = covering.solve_set_covering(candidates, zones, 8, scored["ahp_score"].to_numpy(), TK)
@@ -66,7 +66,7 @@ figs = [
     ("Marginal coverage curve", viz.chart_marginal_curve(curve)),
     ("Optimised vs real stations", viz.chart_comparison(bench)),
     ("Response distribution", viz.chart_response_distribution(a.assignments, 8)),
-    ("LP vs greedy dispatch", viz.chart_dispatch_comparison(a.total_time_min,
+    ("LP vs greedy dispatch", viz.chart_dispatch_comparison(a.benchmark_lp_min,
                                                             a.greedy_total_min)),
 ]
 

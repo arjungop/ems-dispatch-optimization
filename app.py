@@ -9,7 +9,6 @@ Run:  streamlit run app.py
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -27,7 +26,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-MAP_H = 520
+MAP_H = 600
 
 
 # ---------------------------------------------------------------------------
@@ -135,35 +134,44 @@ with st.sidebar:
              "but are typed by their cause.",
     )
 
-    min_share_pct = st.slider(
-        "Zone materiality floor (% of demand)", 0.0, 1.0,
-        100 * data_loader.DEFAULT_MIN_DEMAND_SHARE, 0.05,
-        help="ZIP zones below this share of period demand are excluded from the "
-             "models. The feed carries a long tail of fringe ZIPs with a handful "
-             "of mutual-aid calls a year; set covering would otherwise give each "
-             "of them its own dedicated station.",
-    )
-
     st.header("Response-time model")
-    st.caption("Haversine straight-line distance → estimated road response time.")
-    st.slider("Effective speed (km/h)", 20.0, 80.0, config.DEFAULT_SPEED_KMH, 2.5,
-              key="speed", help="Average emergency-response speed on city streets.")
-    st.slider("Road circuity factor", 1.0, 1.8, config.DEFAULT_CIRCUITY, 0.05,
-              key="circuity", help="Streets are longer than the straight line between "
-                                   "two points; 1.3 is the usual urban value.")
-    st.slider("Turnout time (min)", 0.0, 4.0, config.DEFAULT_TURNOUT_MIN, 0.5,
-              key="turnout", help="Time from alarm to wheels rolling, added to travel time.")
 
-    threshold = st.select_slider(
-        "Response-time limit (min)",
-        options=[4, 5, 6, 7, 8, 9, 10, 12, 15],
-        value=8,
-        help="A zone counts as covered if a station can reach it within this limit.",
-    )
-    st.caption(
-        f"Implied reach ≈ "
-        f"{max(threshold - st.session_state['turnout'], 0) / 60 * st.session_state['speed'] / st.session_state['circuity']:.1f} km"
-    )
+    # The limit is the one number the models are actually steered by, so it
+    # stays in the open; the calibration constants behind it are assumptions a
+    # reader rarely changes, and are tucked away so the sidebar reads as two
+    # decisions rather than seven knobs. The slot reserves the limit's position
+    # above the expander even though its sliders must be created first.
+    limit_slot = st.container()
+
+    with st.expander("Model assumptions"):
+        st.caption("Haversine straight-line distance → estimated road response time.")
+        st.slider("Effective speed (km/h)", 20.0, 80.0, config.DEFAULT_SPEED_KMH, 2.5,
+                  key="speed", help="Average emergency-response speed on city streets.")
+        st.slider("Road circuity factor", 1.0, 1.8, config.DEFAULT_CIRCUITY, 0.05,
+                  key="circuity", help="Streets are longer than the straight line between "
+                                       "two points; 1.3 is the usual urban value.")
+        st.slider("Turnout time (min)", 0.0, 4.0, config.DEFAULT_TURNOUT_MIN, 0.5,
+                  key="turnout", help="Time from alarm to wheels rolling, added to travel time.")
+        min_share_pct = st.slider(
+            "Zone materiality floor (% of demand)", 0.0, 1.0,
+            100 * data_loader.DEFAULT_MIN_DEMAND_SHARE, 0.05,
+            help="ZIP zones below this share of period demand are excluded from the "
+                 "models. The feed carries a long tail of fringe ZIPs with a handful "
+                 "of mutual-aid calls a year; set covering would otherwise give each "
+                 "of them its own dedicated station.",
+        )
+
+    with limit_slot:
+        threshold = st.select_slider(
+            "Response-time limit (min)",
+            options=[4, 5, 6, 7, 8, 9, 10, 12, 15],
+            value=8,
+            help="A zone counts as covered if a station can reach it within this limit.",
+        )
+        st.caption(
+            f"Implied reach ≈ "
+            f"{max(threshold - st.session_state['turnout'], 0) / 60 * st.session_state['speed'] / st.session_state['circuity']:.1f} km"
+        )
 
 sel, all_zones = period_slice(start_date, end_date, include_trauma, min_share_pct / 100.0)
 
@@ -263,23 +271,17 @@ with tabs[0]:
         "where and when real emergencies occur across the city."
     )
 
-    st.markdown("**What's inside the dataset**")
-    st.dataframe(pd.DataFrame([
-        ("address / latitude / longitude", "Exact incident location", "Mapping demand, distances"),
-        ("type", "Kind of call (medical, aid, fire…)", "Filtering to EMS calls only"),
-        ("datetime", "Date and time of the call", "Peak-hour stats, dispatch scenario"),
-        ("zip code (computed)", "Which zone the incident is in", "Grouping demand into zones"),
-        ("incident number", "Unique ID per call", "De-duplication"),
-    ], columns=["Field", "Meaning", "Used for"]), hide_index=True, width="stretch")
+    with st.expander("What's inside the dataset"):
+        st.dataframe(pd.DataFrame([
+            ("address / latitude / longitude", "Exact incident location", "Mapping demand, distances"),
+            ("type", "Kind of call (medical, aid, fire…)", "Filtering to EMS calls only"),
+            ("datetime", "Date and time of the call", "Peak-hour stats, dispatch scenario"),
+            ("zip code (computed)", "Which zone the incident is in", "Grouping demand into zones"),
+            ("incident number", "Unique ID per call", "De-duplication"),
+        ], columns=["Field", "Meaning", "Used for"]), hide_index=True, width="stretch")
 
     st.subheader("How everything connects")
     st.html(viz.flow_diagram())
-    m1, m2, m3, m4 = st.columns(4)
-    m1.success("**Step 1 — Statistics**  \nBusiest zones, peak timing, demand weights.")
-    m2.success("**Step 2 — AHP**  \nRank candidate areas on three weighted criteria.")
-    m3.success("**Step 3 — Covering (ILP)**  \nWhere stations should go.")
-    m4.success("**Step 4 — Assignment (LP)**  \nWhich unit goes to which incident.")
-
     st.caption(
         "The link between the two optimisations is the core contribution: the station "
         "locations chosen by the covering model become the ambulance bases used by the "
@@ -287,14 +289,14 @@ with tabs[0]:
     )
 
     st.subheader("Tools & tech stack")
-    t = st.columns(3)
-    t[0].markdown("**Python + pandas**  \nLoading data & computing statistics")
-    t[1].markdown("**PuLP**  \nSolving the covering (ILP) & assignment (LP) models")
-    t[2].markdown("**Streamlit**  \nThe interactive user interface")
-    t = st.columns(3)
-    t[0].markdown("**Folium / Plotly**  \nMapping incidents & stations")
-    t[1].markdown("**Haversine**  \nEstimating travel distance / time")
-    t[2].markdown("**Data ingestion**  \nExport CSV from portal / API into the app")
+    st.markdown(
+        "**Python + pandas** loading data & computing statistics · "
+        "**PuLP** solving the covering (ILP) & assignment (LP) models · "
+        "**Streamlit** the interactive user interface · "
+        "**Folium / Plotly** mapping incidents & stations · "
+        "**Haversine** estimating travel distance / time · "
+        "**Data ingestion** export CSV from portal / API into the app"
+    )
 
     st.html(viz.team_strip(config.COURSE, config.TEAM))
 
@@ -312,7 +314,12 @@ with tabs[1]:
     h = stats.headline(sel)
     k = st.columns(5)
     kpi(k[0], "EMS incidents", f"{h['incidents']:,}")
-    kpi(k[1], "Demand zones", f"{h['zones']}")
+    # The models plan around the material zones, so this reports that count --
+    # the header does too, and the two disagreeing is exactly the kind of thing
+    # that derails a demo.
+    kpi(k[1], "Demand zones", f"{zones.shape[0]}",
+        f"Zones the optimisation models plan around. {h['zones']} ZIP zones appear "
+        f"in the feed for this period; those under the materiality floor are excluded.")
     kpi(k[2], "Avg per day", f"{h['per_day']:.0f}")
     kpi(k[3], "Busiest zone", h["busiest_zone"])
     kpi(k[4], "Peak hour", h["peak_hour"])
@@ -336,25 +343,22 @@ with tabs[1]:
     c1, c2 = st.columns(2)
     c1.plotly_chart(viz.chart_calls_by_hour(by_hour), width="stretch")
     c2.plotly_chart(viz.chart_calls_by_weekday(by_wd), width="stretch")
-    st.plotly_chart(viz.chart_heatmap(stats.hour_weekday_heatmap(sel)),
-                    width="stretch")
+    with st.expander("More detail — hour × weekday, call mix, daily trend"):
+        st.plotly_chart(viz.chart_heatmap(stats.hour_weekday_heatmap(sel)),
+                        width="stretch")
+        c1, c2 = st.columns(2)
+        c1.plotly_chart(viz.chart_call_types(stats.call_type_mix(sel)), width="stretch")
+        c2.plotly_chart(viz.chart_daily_trend(stats.daily_trend(sel)), width="stretch")
 
-    c1, c2 = st.columns(2)
-    c1.plotly_chart(viz.chart_call_types(stats.call_type_mix(sel)), width="stretch")
-    with c2:
-        st.plotly_chart(viz.chart_daily_trend(stats.daily_trend(sel)), width="stretch")
-        st.markdown("**Demand weights fed into both optimisations**")
-        st.dataframe(
-            stats.demand_weights(zones)[["rank", "zip_code", "demand", "weight_pct"]]
-            .rename(columns={"zip_code": "ZIP", "demand": "incidents",
-                             "weight_pct": "weight %"}),
-            hide_index=True, width="stretch", height=260,
-        )
+    st.markdown("#### Demand weights fed into both optimisations")
+    st.dataframe(
+        stats.demand_weights(zones)[["rank", "zip_code", "demand", "weight_pct"]]
+        .rename(columns={"zip_code": "ZIP", "demand": "incidents",
+                         "weight_pct": "weight %"}),
+        hide_index=True, width="stretch", height=260,
+    )
 
-    st.divider()
-    st.markdown("#### Demand on the map")
-    st_folium(viz.map_demand(zones, sel, zip_geojson), height=MAP_H,
-              width="stretch", returned_objects=[], key="map_demand")
+    st.caption("↳ See this demand on the city map in **Decision Map**.")
 
 
 # ===========================================================================
@@ -383,12 +387,19 @@ with tabs[2]:
         )
 
     st.divider()
-    st.warning(
-        "**The sliders below start on placeholder judgements, not the team's.** "
-        "Each member should set their own comparisons in their tab. The criterion "
-        "weights — and therefore the site ranking and the candidate pool the "
-        "covering model chooses from — depend on these values."
-    )
+    if not config.JUDGEMENTS_ARE_REAL:
+        st.warning(
+            "**The sliders below start on placeholder judgements, not the team's.** "
+            "Each member should set their own comparisons in their tab, and the "
+            "agreed values belong in `TEAM_JUDGEMENTS` in `src/config.py` so they "
+            "persist. The criterion weights — and therefore the site ranking and "
+            "the candidate pool the covering model chooses from — depend on them."
+        )
+    else:
+        st.caption(
+            "Each tab below is seeded with that member's own pairwise ratings, "
+            "recorded in `TEAM_JUDGEMENTS` in `src/config.py`."
+        )
 
     n_members = st.number_input(
         "Team members filling the table independently", 1, 8, len(config.TEAM), 1,
@@ -418,7 +429,7 @@ with tabs[2]:
             cols = st.columns(3)
             for pi, (i, j) in enumerate(PAIRS):
                 a, b = config.AHP_CRITERIA[i], config.AHP_CRITERIA[j]
-                default = ahp_mod.DEFAULT_COMPARISONS[(i, j)]
+                default = config.judgements_for(member_names[mi])[(i, j)]
                 val = cols[pi].select_slider(
                     f"**{a}** vs **{b}**", options=SAATY, value=default,
                     format_func=lambda v: LBL[v], key=f"ahp_{mi}_{i}_{j}",
@@ -455,14 +466,17 @@ with tabs[2]:
             st.error(f"**CR = {d['CR']:.4f} ≥ 0.10** — the judgements contradict each "
                      "other. Revise the comparisons before using these weights.")
 
-        st.markdown("**Per-member consistency**")
-        st.dataframe(pd.DataFrame([
-            {"Member": member_names[p["member"] - 1], "λmax": round(p["lambda_max"], 4),
-             "CI": round(p["CI"], 4), "CR": round(p["CR"], 4),
-             "CR < 0.1": "yes" if p["consistent"] else "NO",
-             **{c: round(w, 4) for c, w in zip(result.criteria, p["weights"])}}
-            for p in result.per_member
-        ]), hide_index=True, width="stretch")
+        # Per-member diagnostics matter when a member's judgements are the
+        # problem, but the aggregate CR above is the headline -- so the
+        # breakdown sits one click away rather than on the page.
+        with st.expander("Per-member consistency"):
+            st.dataframe(pd.DataFrame([
+                {"Member": member_names[p["member"] - 1], "λmax": round(p["lambda_max"], 4),
+                 "CI": round(p["CI"], 4), "CR": round(p["CR"], 4),
+                 "CR < 0.1": "yes" if p["consistent"] else "NO",
+                 **{c: round(w, 4) for c, w in zip(result.criteria, p["weights"])}}
+                for p in result.per_member
+            ]), hide_index=True, width="stretch")
 
     st.divider()
     st.markdown("#### Candidate sites ranked by AHP priority")
@@ -505,15 +519,24 @@ with tabs[3]:
     scored = st.session_state.get("ahp_scored")
     if scored is None:
         scored = ahp_mod.score_sites(
-            zones, existing_stations, ahp_mod.run_ahp([ahp_mod.DEFAULT_COMPARISONS]),
+            zones, existing_stations,
+            ahp_mod.run_ahp([config.judgements_for(n) for n, _ in config.TEAM]),
             threshold, **tk)
 
-    cand_pool = st.slider(
-        "Candidate sites considered (top-N by AHP priority)",
-        3, len(scored), len(scored), 1,
-        help="AHP ranks the areas; the covering model then chooses among the "
-             "highest-ranked ones.",
-    )
+    # A short period or a high materiality floor can leave very few zones, and
+    # a slider whose min exceeds its max is an outright error -- so below four
+    # sites there is nothing to choose and the whole pool is used.
+    n_sites = len(scored)
+    if n_sites > 3:
+        cand_pool = st.slider(
+            "Candidate sites considered (top-N by AHP priority)",
+            3, n_sites, n_sites, 1,
+            help="AHP ranks the areas; the covering model then chooses among the "
+                 "highest-ranked ones.",
+        )
+    else:
+        cand_pool = n_sites
+        st.caption(f"All {n_sites} candidate site(s) in this period are considered.")
     candidates = scored.head(cand_pool)[["zip_code", "latitude", "longitude"]].copy()
     cand_ahp = scored.head(cand_pool)["ahp_score"].to_numpy()
 
@@ -525,11 +548,9 @@ with tabs[3]:
     )
 
     if mode.startswith("Mode A"):
-        st.markdown(
-            "Determines the **minimum number of stations** required such that every "
-            "demand zone is served within the response time. Each candidate location is "
-            "a binary decision, and the model guarantees complete coverage at the lowest "
-            "possible facility count.  \n**Objective: minimise number of stations.**"
+        st.caption(
+            "Minimum stations such that every demand zone is served within the limit. "
+            "**Objective: minimise number of stations.**"
         )
         run = st.button("Solve set-covering model", type="primary")
         if run:
@@ -537,13 +558,19 @@ with tabs[3]:
                 st.session_state["cover"] = covering.solve_set_covering(
                     candidates, zones, threshold, cand_ahp, tk)
     else:
-        st.markdown(
-            "Fixes the number of stations at a **user-defined limit** and positions them "
-            "to serve the greatest possible share of demand. This reflects real-world "
-            "budget constraints, where full coverage may be infeasible.  \n"
-            "**Objective: maximise demand covered.**"
+        st.caption(
+            "Station count fixed at P, placed to serve the greatest share of demand — "
+            "the budget-constrained case. **Objective: maximise demand covered.**"
         )
-        p = st.slider("Station budget P", 1, min(30, len(candidates)), 8, 1)
+        # The budget cannot exceed the candidate pool, and the default has to be
+        # clamped into that range -- a value above max_value is an error, and
+        # the pool shrinks as soon as the slider above is pulled down.
+        p_max = max(1, min(30, len(candidates)))
+        if p_max > 1:
+            p = st.slider("Station budget P", 1, p_max, min(8, p_max), 1)
+        else:
+            p = 1
+            st.caption("Only one candidate site available — the budget is fixed at 1.")
         run = st.button("Solve maximal-covering model", type="primary")
         if run:
             with st.spinner("Solving ILP…"):
@@ -561,7 +588,7 @@ with tabs[3]:
         kpi(k[1], "Demand covered", f"{res.demand_pct:.1f}%",
             f"{res.demand_covered:,.0f} of {res.demand_total:,.0f} incidents")
         kpi(k[2], "Zones covered", f"{res.zones_covered}/{res.zones_total}")
-        kpi(k[3], "Solver status", res.status)
+        kpi(k[3], "Solver status", res.status, f"Solved with {config.solver_name()}.")
         kpi(k[4], "Solve time", f"{res.solve_seconds:.2f}s")
 
         if res.uncoverable:
@@ -587,10 +614,7 @@ with tabs[3]:
                              "response_min": "response (min)"}),
             hide_index=True, width="stretch", height=320)
 
-        st.markdown("#### Placement on the map")
-        st_folium(viz.map_coverage(res, existing_stations, True, **tk),
-                  height=MAP_H, width="stretch",
-                  returned_objects=[], key="map_cover")
+        st.caption("↳ See this placement on the city map in **Decision Map**.")
 
     st.divider()
     st.markdown("#### How does coverage change at 5 vs 8 vs 10 minutes?")
@@ -674,9 +698,24 @@ with tabs[4]:
                                        f"{int(busiest.loc[busiest['hour_start'] == t, 'incidents'].iloc[0])} incidents"),
                 help="The busiest clock hours in the selected period.",
             )
-            units = st.slider("Ready units per station", 1, 4, 1,
+            # The deck's setup is one ready unit per base, so that stays the
+            # default -- but the range has to reach a balanced fleet, or the
+            # model's own "each incident -> exactly one ambulance" is
+            # unreachable for a busy hour and most calls go unserved. The bound
+            # is a fixed 12 rather than one derived from the current station
+            # count: a slider whose max moves is a different widget each time,
+            # and Streamlit would silently reset it whenever the plan changed.
+            n_calls = int(busiest.loc[busiest["hour_start"] == chosen_hour,
+                                      "incidents"].iloc[0])
+            need = -(-n_calls // max(res.n_stations, 1))  # ceil division
+            units = st.slider("Ready units per station", 1, 12, 1, key="units_per_station",
                               help="One ready unit stationed at each base, per the model's "
                                    "setup. Raise it if the hour has more calls than bases.")
+            if need > 1:
+                st.caption(
+                    f"↳ {need} units per station ({need * res.n_stations} in total) would "
+                    "field every call this hour — below that, the surplus calls wait."
+                )
         with c2:
             st.markdown("**Busiest hours in this period**")
             st.dataframe(busiest.head(10)[["rank", "hour_start", "weekday", "incidents"]],
@@ -731,7 +770,7 @@ with tabs[4]:
                                      "response_min": "response (min)"}),
                     hide_index=True, width="stretch", height=360)
             with c2:
-                st.plotly_chart(viz.chart_dispatch_comparison(a.total_time_min,
+                st.plotly_chart(viz.chart_dispatch_comparison(a.benchmark_lp_min or 0.0,
                                                               a.greedy_total_min or 0.0),
                                 width="stretch")
                 if a.greedy_total_min:
@@ -739,7 +778,13 @@ with tabs[4]:
                               f"{a.improvement_pct:.1f}%",
                               help="Greedy dispatch sends the nearest free unit call by "
                                    "call, which can strand a later incident with a very "
-                                   "long drive. The LP optimises the hour as a whole.")
+                                   "long drive. The LP optimises the set as a whole.")
+                    st.caption(
+                        f"Measured over the same {a.benchmark_n_incidents} calls on both "
+                        "sides — the ones arriving first, which a dispatcher has to clear. "
+                        "Comparing the full-hour LP against greedy would instead reward the "
+                        "LP for answering only the nearest calls."
+                    )
 
             st.plotly_chart(viz.chart_response_distribution(a.assignments, threshold),
                             width="stretch")
@@ -751,9 +796,7 @@ with tabs[4]:
                     st.markdown(f"**Balanced matrix — padded with {a.dummy_kind}**")
                     st.dataframe(a.balanced_matrix, width="stretch")
 
-            st.markdown("#### Dispatch on the map")
-            st_folium(viz.map_dispatch(a, st.session_state["asg_amb"]), height=MAP_H,
-                      width="stretch", returned_objects=[], key="map_dispatch")
+            st.caption("↳ See these dispatches on the city map in **Decision Map**.")
 
 
 # ===========================================================================
@@ -771,7 +814,7 @@ with tabs[5]:
     )
 
     if layer == "Demand by zone":
-        st_folium(viz.map_demand(zones, sel, zip_geojson), height=600,
+        st_folium(viz.map_demand(zones, sel, zip_geojson), height=MAP_H,
                   width="stretch", returned_objects=[], key="dm_demand")
         st.caption("Circle size and colour both encode EMS incident volume per ZIP "
                    "zone. Toggle the incident heat layer from the control top-right.")
@@ -779,7 +822,7 @@ with tabs[5]:
         if res is None:
             st.info("Run the covering model in **3 · Covering Model** first.")
         else:
-            st_folium(viz.map_coverage(res, existing_stations, True, **tk), height=600,
+            st_folium(viz.map_coverage(res, existing_stations, True, **tk), height=MAP_H,
                       width="stretch", returned_objects=[], key="dm_cover")
             st.caption("Blue markers are the stations our model opens, with their "
                        f"{res.threshold_min:g}-minute reach. Green zones are covered, "
@@ -790,7 +833,7 @@ with tabs[5]:
         if a is None:
             st.info("Solve the assignment model in **4 · Dispatch Assignment** first.")
         else:
-            st_folium(viz.map_dispatch(a, st.session_state["asg_amb"]), height=600,
+            st_folium(viz.map_dispatch(a, st.session_state["asg_amb"]), height=MAP_H,
                       width="stretch", returned_objects=[], key="dm_disp")
             st.caption("Each line is one ambulance dispatched to one incident under the "
                        "optimal plan. Red incidents had no unit available this hour.")

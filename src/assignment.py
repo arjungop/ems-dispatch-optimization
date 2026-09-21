@@ -44,13 +44,19 @@ class AssignmentResult:
     dummy_kind: str                  # "none" | "dummy ambulances" | "dummy incidents"
     solve_seconds: float = 0.0
     greedy_total_min: float | None = None
+    benchmark_lp_min: float | None = None  # optimal total over the benchmark calls
+    benchmark_n_incidents: int = 0         # how many calls both sides had to clear
 
     @property
     def improvement_pct(self) -> float:
-        """How much better than nearest-available greedy dispatch."""
-        if not self.greedy_total_min:
+        """Routing advantage of optimal dispatch over nearest-unit-first greedy.
+
+        Both sides are measured on the same calls -- see ``benchmark_vs_greedy``
+        for why the comparison has to be restricted that way.
+        """
+        if not self.greedy_total_min or self.benchmark_lp_min is None:
             return 0.0
-        return 100.0 * (self.greedy_total_min - self.total_time_min) / self.greedy_total_min
+        return 100.0 * (self.greedy_total_min - self.benchmark_lp_min) / self.greedy_total_min
 
 
 def build_cost_matrix(
@@ -104,6 +110,44 @@ def greedy_baseline(cost: np.ndarray) -> float:
     return total
 
 
+def _optimal_total(cost: np.ndarray, msg: bool = False) -> float:
+    """Optimal total travel time for this cost matrix, via the same balanced LP."""
+    bal, _, _, _ = balance(cost)
+    n = bal.shape[0]
+    prob = pulp.LpProblem("assignment_benchmark", pulp.LpMinimize)
+    x = {(i, j): pulp.LpVariable(f"b_{i}_{j}", lowBound=0, upBound=1, cat="Continuous")
+         for i in range(n) for j in range(n)}
+    prob += pulp.lpSum(float(bal[i, j]) * x[(i, j)] for i in range(n) for j in range(n))
+    for j in range(n):
+        prob += pulp.lpSum(x[(i, j)] for i in range(n)) == 1
+    for i in range(n):
+        prob += pulp.lpSum(x[(i, j)] for j in range(n)) <= 1
+    prob.solve(config.get_solver(msg=msg))
+    return float(pulp.value(prob.objective) or 0.0)
+
+
+def benchmark_vs_greedy(cost: np.ndarray, msg: bool = False) -> tuple[float, float, int]:
+    """Optimal vs greedy dispatch, measured over the same calls.
+
+    A peak hour usually has more calls than ready units. Unserved calls cost
+    nothing in the objective, so an unrestricted LP would quietly serve the
+    *cheapest* calls and leave the far ones waiting, while greedy has to take
+    calls as they arrive. Comparing those two totals would measure triage --
+    which calls each method chose to answer -- rather than routing, and would
+    overstate the LP's advantage several-fold.
+
+    So both sides are given the same workload: the first ``k = min(n_amb,
+    n_inc)`` calls in arrival order, which is what a dispatcher actually has to
+    clear. What remains in the gap is purely the quality of the matching.
+
+    Returns ``(optimal_total_min, greedy_total_min, k)``.
+    """
+    n_amb, n_inc = cost.shape
+    k = min(n_amb, n_inc)
+    sub = cost[:, :k]
+    return _optimal_total(sub, msg), greedy_baseline(sub), k
+
+
 def solve_assignment(
     ambulances: pd.DataFrame,
     incidents: pd.DataFrame,
@@ -140,7 +184,7 @@ def solve_assignment(
     for i in range(n):
         prob += pulp.lpSum(x[(i, j)] for j in range(n)) <= 1, f"ambulance_{i}"
 
-    prob.solve(pulp.PULP_CBC_CMD(msg=msg))
+    prob.solve(config.get_solver(msg=msg))
     status = pulp.LpStatus[prob.status]
 
     n_amb, n_inc = cost.shape
@@ -178,6 +222,8 @@ def solve_assignment(
     times = pd.Series(exact, dtype=float)
     n_idle = max(n_amb - int(served.sum()), 0)
 
+    bench_lp, greedy_min, bench_k = benchmark_vs_greedy(cost, msg)
+
     labels_amb = amb_label + [f"dummy-amb-{k+1}" for k in range(pad_rows)]
     labels_inc = [str(v) for v in incidents["incident_number"]] + [
         f"dummy-inc-{k+1}" for k in range(pad_cols)
@@ -201,7 +247,9 @@ def solve_assignment(
         n_idle=n_idle,
         dummy_kind=kind,
         solve_seconds=float(prob.solutionTime or 0.0),
-        greedy_total_min=greedy_baseline(cost),
+        greedy_total_min=greedy_min,
+        benchmark_lp_min=bench_lp,
+        benchmark_n_incidents=bench_k,
     )
 
 
