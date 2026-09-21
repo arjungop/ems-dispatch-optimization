@@ -93,7 +93,7 @@ def build_processed(
     df["year"] = df["datetime"].dt.year.astype("int16")
 
     cols = [
-        "incident_number", "type", "datetime", "date", "year", "hour", "weekday",
+        "incident_number", "type", "datetime", "year", "hour", "weekday",
         "address", "latitude", "longitude", "zip_code", "is_ems_core", "is_ems_trauma",
     ]
     df = df[cols]
@@ -112,8 +112,23 @@ def load_incidents(path: Path | None = None) -> pd.DataFrame:
             "  python scripts/download_data.py\n"
             "  python scripts/preprocess.py"
         )
-    df = pd.read_parquet(path)
+    # The app holds this table for the whole session, so it is worth loading
+    # lean. Two savings, together roughly halving it at 2.2M rows:
+    #
+    #   `date` duplicates `datetime` -- daily_trend derives its own from
+    #   `datetime` -- and costs ~88 MB as object dtype, so it is never read.
+    #
+    #   `type` has 270 distinct values and `zip_code` 49, so holding them as
+    #   categories rather than strings saves ~75 MB. Every groupby over them
+    #   already passes observed=True, which is the categorical-aware form.
+    import pyarrow.parquet as pq
+
+    wanted = [c for c in pq.ParquetFile(path).schema_arrow.names if c != "date"]
+    df = pd.read_parquet(path, columns=wanted)
     df["datetime"] = pd.to_datetime(df["datetime"])
+    for col in ("type", "zip_code"):
+        if col in df.columns and not isinstance(df[col].dtype, pd.CategoricalDtype):
+            df[col] = df[col].astype("category")
     return df
 
 
