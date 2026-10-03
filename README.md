@@ -2,9 +2,6 @@
 
 Optimizing where ambulances wait and how they are dispatched, using real Seattle 911 data.
 
-**Operations Research · Project Review 1** — Aadith Krishna (CB.SC.U4AIE23202),
-Aditya Santosh (CB.SC.U4AIE23207), Suryansh Ram Menon (CB.SC.U4AIE23255),
-Arjun Gopal (CB.SC.U4AIE23271).
 
 In a medical emergency, survival is decided in minutes. Two operational decisions control
 how fast an ambulance actually reaches a patient, and both can be optimized:
