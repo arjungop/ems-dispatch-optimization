@@ -44,7 +44,10 @@ Headline results over the last 12 months (79,152 EMS incidents, 28 demand zones)
 > **The datasets are not in this repository.** The raw 911 feed is ~191 MB, over GitHub's
 > file-size limit, so `data/` is generated locally by the first two commands below.
 
+Needs **Python 3.10 or newer** (Streamlit's own floor); developed and tested on 3.13.
+
 ```bash
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 python scripts/download_data.py    # ~2.2M real 911 records + stations + ZIP polygons
@@ -220,9 +223,9 @@ and every model re-solves against the current settings.
 ## Project layout
 
 ```
-app.py                     Streamlit application (6 tabs)
+app.py                     Streamlit application (4 tabs)
 requirements.txt
-.streamlit/config.toml     Pinned light theme, so the app looks the same anywhere
+.streamlit/config.toml     Light & dark themes, both built from the src/viz.py tokens
 scripts/
   download_data.py         Fetch all three real datasets
   preprocess.py            Clean → EMS-filter → ZIP-tag → Parquet cache
@@ -247,15 +250,14 @@ data/
 
 ```bash
 python scripts/verify_pipeline.py   # 59 checks — every model, on the real data
-python scripts/test_app.py          # 37 checks — drives the app headlessly
+python scripts/test_app.py          # 31 checks — drives the app headlessly
 ```
 
-`test_app.py` also checks the presentation layer — that the methodology diagram
-renders with both optimisations and the covering→assignment linkage, and that the
-team roster and the per-member AHP tabs carry the right names, and that the four
-project objectives, the project's significance and the six tools are all stated —
-so the parts of the deliverable that are looked at rather than computed cannot
-silently regress.
+`test_app.py` also checks the presentation layer — that every stage of the
+pipeline has its tab, that each team member gets their own AHP comparison tab,
+that every section heading and headline KPI is on the page, and that all three
+Folium maps build — so the parts of the deliverable that are looked at rather
+than computed cannot silently regress.
 
 `verify_pipeline.py` asserts the properties each model must satisfy, not just that
 it runs: set covering must reach full coverage of every reachable zone; maximal
@@ -272,7 +274,7 @@ exhaustive enumeration of every possible station subset, the AHP weights are
 checked against the largest-modulus eigenvector on 200 random reciprocal
 matrices, and the dispatch LP is checked against greedy on 150 random cost
 matrices. A solver swap or a drift in how a model is stated therefore cannot
-pass unnoticed. Both suites currently pass in full — 59 and 37 checks, 0
+pass unnoticed. Both suites currently pass in full — 59 and 31 checks, 0
 failures.
 
 ### Results on the real data

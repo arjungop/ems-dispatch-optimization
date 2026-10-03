@@ -147,7 +147,7 @@ def solve_set_covering(
 
     open_idx = [i for i in range(n_c) if y[i].value() is not None and y[i].value() > 0.5]
     return _package(
-        "Set Covering", threshold_min, status, open_idx, candidates, zones,
+        "Minimum Stations", threshold_min, status, open_idx, candidates, zones,
         a, times, uncoverable, prob.solutionTime,
     )
 
@@ -193,7 +193,7 @@ def solve_maximal_covering(
     open_idx = [i for i in range(n_c) if y[i].value() is not None and y[i].value() > 0.5]
     uncoverable = zones.loc[~a.any(axis=0), "zip_code"].astype(str).tolist()
     return _package(
-        f"Maximal Covering (P={p})", threshold_min, status, open_idx,
+        f"Fixed Budget (P={p})", threshold_min, status, open_idx,
         candidates, zones, a, times, uncoverable, prob.solutionTime,
     )
 

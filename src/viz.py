@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from folium.plugins import HeatMap, MarkerCluster
+from folium.plugins import MarkerCluster
 
 # --- categorical slots (fixed order) ---------------------------------------
 SERIES = {
@@ -33,9 +33,23 @@ STATUS = {
     "light": {"good": "#008300", "critical": "#e34948", "warning": "#eda100"},
     "dark": {"good": "#008300", "critical": "#e66767", "warning": "#c98500"},
 }
-# --- single-hue sequential ramp (light -> dark blue), lightness monotone ----
+# --- single-hue sequential ramp, lightness monotone ------------------------
+# "Monotone" has to mean monotone *in contrast against the surface it is drawn
+# on*, not monotone in absolute lightness. Light-to-dark reads correctly on a
+# white page, but on the dark basemap and the dark plot ground the same ramp
+# paints the emptiest zones nearly white and the busiest ones almost into the
+# background -- the hierarchy inverts. The dark mode therefore runs the same
+# eight hues the other way, so in both modes the strongest value is the one
+# that stands furthest from its backdrop.
 SEQ_BLUE = ["#e8f1fb", "#c3dbf4", "#98c0ec", "#6aa2e0", "#3f85d3",
             "#2a78d6", "#1d5da6", "#133f73"]
+SEQ = {"light": SEQ_BLUE, "dark": SEQ_BLUE[::-1]}
+
+# Streamlit loads Inter for the app chrome (see .streamlit/config.toml); naming
+# it here too stops every chart from falling back to Plotly's own default and
+# rendering in a visibly different typeface from the headings around it.
+FONT = ('Inter, "Source Sans Pro", -apple-system, BlinkMacSystemFont, '
+        'system-ui, sans-serif')
 
 INK = {
     "light": {"primary": "#0b0b0b", "secondary": "#52514e", "muted": "#8a8985",
@@ -67,6 +81,11 @@ def tokens() -> tuple[dict, dict, dict]:
     return SERIES[m], STATUS[m], INK[m]
 
 
+def seq() -> list[str]:
+    """The sequential ramp oriented for the mode the viewer is in."""
+    return SEQ[theme()]
+
+
 def _style(fig: go.Figure, ink: dict, height: int = 340, showlegend: bool = False) -> go.Figure:
     """Recessive axes, transparent surface, text in ink tokens not series colour.
 
@@ -80,10 +99,11 @@ def _style(fig: go.Figure, ink: dict, height: int = 340, showlegend: bool = Fals
         margin=dict(l=64, r=28, t=52, b=56),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color=ink["secondary"], size=12),
-        title=dict(font=dict(color=ink["primary"], size=15), x=0, xanchor="left",
-                   y=0.97, yanchor="top"),
-        hoverlabel=dict(font_size=12),
+        font=dict(family=FONT, color=ink["secondary"], size=12),
+        title=dict(font=dict(family=FONT, color=ink["primary"], size=14.5,
+                             weight=600),
+                   x=0, xanchor="left", y=0.97, yanchor="top"),
+        hoverlabel=dict(font_size=12, font_family=FONT),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0,
                     font=dict(color=ink["secondary"])),
     )
@@ -94,6 +114,17 @@ def _style(fig: go.Figure, ink: dict, height: int = 340, showlegend: bool = Fals
                      automargin=True, title_standoff=12,
                      tickfont=dict(color=ink["secondary"]))
     return fig
+
+
+def _headroom(values, pad: float = 1.14) -> list[float]:
+    """An axis range that leaves room for ``textposition="outside"`` labels.
+
+    Plotly sizes a value axis to the bars alone and then draws the label past
+    the end of the longest one, so without this the top bar's number is cut off
+    by the plot edge -- the single most visible defect on every ranked chart.
+    """
+    top = float(max(values)) if len(values) else 1.0
+    return [0, (top if top > 0 else 1.0) * pad]
 
 
 def _lock_category_order(fig: go.Figure, order, axis: str = "y") -> go.Figure:
@@ -122,9 +153,10 @@ def chart_busiest_zones(df: pd.DataFrame, top_n: int = 15) -> go.Figure:
         textposition="outside", textfont=dict(color=ink["secondary"]),
         hovertemplate="ZIP %{y}<br>%{x:,} incidents<extra></extra>",
     ))
-    fig.update_traces(marker_cornerradius=4)
-    fig.update_layout(title=f"Busiest zones — top {top_n} by EMS incident count")
-    fig.update_xaxes(showgrid=True, gridcolor=ink["grid"], title="incidents")
+    fig.update_traces(marker_cornerradius=4, cliponaxis=False)
+    fig.update_layout(title=f"Top {top_n} ZIP zones by EMS incident count")
+    fig.update_xaxes(showgrid=True, gridcolor=ink["grid"], title="incidents",
+                     range=_headroom(d["incidents"]))
     fig.update_yaxes(showgrid=False, title=None)
     _lock_category_order(fig, d["zip_code"])
     return _style(fig, ink, height=max(340, 26 * len(d) + 110))
@@ -140,12 +172,11 @@ def chart_calls_by_hour(df: pd.DataFrame) -> go.Figure:
         text=labels, textposition="outside", textfont=dict(color=ink["secondary"]),
         hovertemplate="%{x}:00–%{x}:59<br>%{y:,} incidents<extra></extra>",
     ))
-    fig.update_traces(marker_cornerradius=4)
-    fig.update_layout(title="Peak timing — EMS calls by hour of day")
+    fig.update_traces(marker_cornerradius=4, cliponaxis=False)
+    fig.update_layout(title="EMS calls by hour of day")
     fig.update_xaxes(title="hour of day", dtick=2)
     # Headroom for the "peak" label, which otherwise clips on the tallest bar.
-    fig.update_yaxes(title="incidents",
-                     range=[0, float(df["incidents"].max()) * 1.14])
+    fig.update_yaxes(title="incidents", range=_headroom(df["incidents"], 1.20))
     return _style(fig, ink)
 
 
@@ -155,7 +186,7 @@ def chart_calls_by_weekday(df: pd.DataFrame) -> go.Figure:
         x=df["weekday"], y=df["incidents"], marker=dict(color=s[1], line=dict(width=0)),
         hovertemplate="%{x}<br>%{y:,} incidents<extra></extra>",
     ))
-    fig.update_traces(marker_cornerradius=4)
+    fig.update_traces(marker_cornerradius=4, cliponaxis=False)
     fig.update_layout(title="EMS calls by day of week")
     fig.update_yaxes(title="incidents")
     return _style(fig, ink)
@@ -164,9 +195,10 @@ def chart_calls_by_weekday(df: pd.DataFrame) -> go.Figure:
 def chart_heatmap(pivot: pd.DataFrame) -> go.Figure:
     """Magnitude across two categorical axes -> single-hue sequential cells."""
     _, _, ink = tokens()
+    ramp = seq()
     fig = go.Figure(go.Heatmap(
         z=pivot.to_numpy(), x=[f"{h:02d}" for h in pivot.columns], y=list(pivot.index),
-        colorscale=[[i / (len(SEQ_BLUE) - 1), c] for i, c in enumerate(SEQ_BLUE)],
+        colorscale=[[i / (len(ramp) - 1), c] for i, c in enumerate(ramp)],
         hovertemplate="%{y} %{x}:00<br>%{z:,} incidents<extra></extra>",
         colorbar=dict(title=dict(text="calls", font=dict(color=ink["secondary"])),
                       tickfont=dict(color=ink["secondary"]), thickness=12),
@@ -226,9 +258,10 @@ def chart_call_types(df: pd.DataFrame) -> go.Figure:
         textfont=dict(color=ink["secondary"]),
         hovertemplate="%{y}<br>%{x:,} incidents<extra></extra>",
     ))
-    fig.update_traces(marker_cornerradius=4)
+    fig.update_traces(marker_cornerradius=4, cliponaxis=False)
     fig.update_layout(title="Which EMS call types make up demand")
-    fig.update_xaxes(showgrid=True, gridcolor=ink["grid"], title="incidents")
+    fig.update_xaxes(showgrid=True, gridcolor=ink["grid"], title="incidents",
+                     range=_headroom(d["incidents"]))
     fig.update_yaxes(showgrid=False, title=None)
     _lock_category_order(fig, d["type"])
     return _style(fig, ink, height=max(340, 28 * len(d) + 110))
@@ -248,7 +281,7 @@ def chart_ahp_weights(weights: pd.Series) -> go.Figure:
         textfont=dict(color=ink["secondary"]),
         hovertemplate="%{y}<br>weight %{x:.1f}%<extra></extra>",
     ))
-    fig.update_traces(marker_cornerradius=4)
+    fig.update_traces(marker_cornerradius=4, cliponaxis=False)
     fig.update_layout(title="Derived criterion weights")
     fig.update_xaxes(showgrid=True, gridcolor=ink["grid"], title="weight (%)",
                      range=[0, max(100.0, float(d.max() * 115))])
@@ -265,11 +298,12 @@ def chart_ahp_ranking(df: pd.DataFrame, top_n: int = 15) -> go.Figure:
         marker=dict(color=s[1], line=dict(width=0)),
         text=[f"{v:.3f}" for v in d["ahp_score"]], textposition="outside",
         textfont=dict(color=ink["secondary"]),
-        hovertemplate="ZIP %{y}<br>AHP priority %{x:.3f}<extra></extra>",
+        hovertemplate="ZIP %{y}<br>priority %{x:.3f}<extra></extra>",
     ))
-    fig.update_traces(marker_cornerradius=4)
-    fig.update_layout(title=f"Candidate sites ranked by AHP priority — top {top_n}")
-    fig.update_xaxes(showgrid=True, gridcolor=ink["grid"], title="priority score")
+    fig.update_traces(marker_cornerradius=4, cliponaxis=False)
+    fig.update_layout(title=f"Top {top_n} candidate sites by AHP priority score")
+    fig.update_xaxes(showgrid=True, gridcolor=ink["grid"], title="priority score",
+                     range=_headroom(d["ahp_score"], 1.18))
     fig.update_yaxes(showgrid=False, title=None)
     _lock_category_order(fig, d["zip_code"])
     return _style(fig, ink, height=max(340, 26 * len(d) + 110))
@@ -289,12 +323,16 @@ def chart_threshold_stations(df: pd.DataFrame) -> go.Figure:
         textfont=dict(color=ink["secondary"]),
         hovertemplate="%{x} limit<br>%{y} stations required<extra></extra>",
     ))
-    fig.update_traces(marker_cornerradius=4)
+    fig.update_traces(marker_cornerradius=4, cliponaxis=False)
     fig.update_layout(title="Stations needed for full coverage")
     # Outside labels sit above the bar, and Plotly does not extend a vertical
     # axis to fit them — without headroom the tallest bar's count is clipped.
-    fig.update_yaxes(title="stations",
-                     range=[0, float(df["stations_required"].max()) * 1.18])
+    # Whole stations only, but a fixed dtick=1 labels every integer up to the
+    # tallest bar -- at a 5-minute limit that is 19 tick labels stacked on one
+    # another. Step up so roughly six labels are drawn whatever the scale.
+    top = int(df["stations_required"].max()) if len(df) else 1
+    fig.update_yaxes(title="stations", dtick=max(1, -(-top // 6)),
+                     range=_headroom(df["stations_required"], 1.18))
     return _style(fig, ink, height=300)
 
 
@@ -308,7 +346,7 @@ def chart_threshold_coverage(df: pd.DataFrame) -> go.Figure:
         textfont=dict(color=ink["secondary"]),
         hovertemplate="%{x} limit<br>%{y:.1f}% of demand covered<extra></extra>",
     ))
-    fig.update_traces(marker_cornerradius=4)
+    fig.update_traces(marker_cornerradius=4, cliponaxis=False)
     fig.update_layout(title="Demand covered at that station count")
     fig.update_yaxes(title="% of demand", range=[0, 108])
     return _style(fig, ink, height=300)
@@ -346,7 +384,7 @@ def chart_comparison(rows: list[dict]) -> go.Figure:
             textposition="outside", textfont=dict(color=ink["secondary"]),
             hovertemplate=f"{name}<br>%{{x}} limit<br>%{{y:.1f}}% covered<extra></extra>",
         ))
-    fig.update_traces(marker_cornerradius=4)
+    fig.update_traces(marker_cornerradius=4, cliponaxis=False)
     fig.update_layout(title="How our placement compares to Seattle's real stations",
                       barmode="group", bargap=0.3, bargroupgap=0.06)
     fig.update_yaxes(title="% of demand covered", range=[0, 112])
@@ -358,18 +396,48 @@ def chart_comparison(rows: list[dict]) -> go.Figure:
 # ---------------------------------------------------------------------------
 
 def chart_response_distribution(df: pd.DataFrame, threshold: float) -> go.Figure:
+    """How many calls land in each minute of response time.
+
+    The counts are binned here rather than by ``go.Histogram`` so the bins are
+    whole minutes a reader can name ("3-4 min") and so the count axis can be
+    given an integer tick step: a single hour yields a handful of calls per
+    bin, and Plotly's automatic ticks then label a count axis 0.5, 1, 1.5 --
+    half an incident is not a thing.
+    """
     s, _, ink = tokens()
     d = df[df["served"]]
-    fig = go.Figure(go.Histogram(
-        x=d["response_min"], nbinsx=20, marker=dict(color=s[1], line=dict(width=0)),
-        hovertemplate="%{x} min<br>%{y} incidents<extra></extra>",
+    if d.empty:
+        fig = go.Figure()
+        fig.update_layout(title="Response times under the optimised dispatch")
+        fig.add_annotation(text="No served incidents to plot", showarrow=False,
+                           font=dict(color=ink["muted"]), x=0.5, y=0.5,
+                           xref="paper", yref="paper")
+        return _style(fig, ink, height=300)
+
+    top = max(float(d["response_min"].max()), float(threshold))
+    edges = np.arange(0.0, np.ceil(top) + 1.0, 1.0)
+    counts, _ = np.histogram(d["response_min"].to_numpy(), bins=edges)
+    centres = edges[:-1] + 0.5
+    cmax = int(counts.max()) if len(counts) else 1
+
+    fig = go.Figure(go.Bar(
+        x=centres, y=counts, width=0.92,
+        marker=dict(color=s[1], line=dict(width=0)),
+        customdata=np.stack([edges[:-1], edges[1:]], axis=-1),
+        hovertemplate="%{customdata[0]:.0f}–%{customdata[1]:.0f} min"
+                      "<br>%{y} incidents<extra></extra>",
     ))
+    fig.update_traces(marker_cornerradius=3, cliponaxis=False)
     fig.add_vline(x=threshold, line_dash="dash", line_color=ink["muted"],
                   annotation_text=f"{threshold:g}-min limit",
+                  annotation_position="top left",
                   annotation_font_color=ink["secondary"])
-    fig.update_layout(title="Response times under the optimised dispatch", bargap=0.06)
-    fig.update_xaxes(title="minutes to scene")
-    fig.update_yaxes(title="incidents")
+    fig.update_layout(title="Response times under the optimised dispatch")
+    fig.update_xaxes(title="minutes to scene", dtick=1, tick0=0,
+                     range=[0, edges[-1]])
+    # Whole incidents only, and headroom so the limit annotation clears the bars.
+    fig.update_yaxes(title="incidents", dtick=max(1, -(-cmax // 6)),
+                     range=_headroom(counts, 1.25))
     return _style(fig, ink, height=300)
 
 
@@ -377,16 +445,16 @@ def chart_dispatch_comparison(optimised: float, greedy: float) -> go.Figure:
     """Total fleet travel time: the LP optimum vs nearest-unit-first dispatch."""
     s, _, ink = tokens()
     fig = go.Figure(go.Bar(
-        x=["Assignment LP (optimal)", "Nearest-unit-first (greedy)"],
+        x=["Optimised dispatch", "Nearest-unit dispatch"],
         y=[optimised, greedy],
         marker=dict(color=[s[1], s[2]], line=dict(width=0)),
         text=[f"{optimised:.1f} min", f"{greedy:.1f} min"], textposition="outside",
         textfont=dict(color=ink["secondary"]),
         hovertemplate="%{x}<br>%{y:.1f} total minutes<extra></extra>",
     ))
-    fig.update_traces(marker_cornerradius=4)
+    fig.update_traces(marker_cornerradius=4, cliponaxis=False)
     fig.update_layout(title="Total fleet travel time for the hour")
-    fig.update_yaxes(title="total minutes", range=[0, max(optimised, greedy) * 1.2 or 1])
+    fig.update_yaxes(title="total minutes", range=_headroom([optimised, greedy], 1.2))
     return _style(fig, ink, height=300)
 
 
@@ -394,21 +462,116 @@ def chart_dispatch_comparison(optimised: float, greedy: float) -> go.Figure:
 # Maps
 # ---------------------------------------------------------------------------
 
+# CartoDB's free "positron"/"dark_matter" tiles now require an API key --
+# unauthenticated requests still return HTTP 200, but the tile image itself is a
+# watermark reading "API KEY REQUIRED". Esri's Gray Canvas needs no key, ships a
+# matching dark variant, and is a desaturated basemap: the standard OpenStreetMap
+# style is a finished map in its own right, and its greens, reds and road
+# casings compete with the data drawn on top of it instead of carrying it.
+_ESRI = ("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/"
+         "World_{}_Gray_Base/MapServer/tile/{{z}}/{{y}}/{{x}}")
+_ESRI_ATTR = 'Tiles &copy; <a href="https://www.esri.com/">Esri</a>'
+
+
 def _base_map(center=(47.6062, -122.3321), zoom: int = 11) -> folium.Map:
-    tiles = "CartoDB dark_matter" if theme() == "dark" else "CartoDB positron"
-    return folium.Map(location=list(center), zoom_start=zoom, tiles=tiles,
-                      control_scale=True)
+    mode = theme()
+    _s, _status, ink = tokens()
+    m = folium.Map(
+        location=list(center), zoom_start=zoom, control_scale=True,
+        tiles=_ESRI.format("Dark" if mode == "dark" else "Light"),
+        attr=_ESRI_ATTR, name="Basemap", max_zoom=16,
+    )
+    # Leaflet's own controls are styled for a generic map product; these bring
+    # the zoom buttons, scale bar and legend into the app's own border radius,
+    # border colour and surface so a map reads as another card on the page.
+    m.get_root().header.add_child(folium.Element(f"""
+<style>
+  .leaflet-container {{ font-family: {FONT}; background: {ink["surface"]}; }}
+  .leaflet-bar, .leaflet-control-layers {{
+      border: 1px solid {ink["grid"]} !important;
+      border-radius: 8px !important; box-shadow: none !important; }}
+  /* Leaflet hard-codes a white chip and a dark glyph for the layers toggle,
+     which stays a bright white square on the dark basemap next to zoom
+     buttons that do follow the theme. */
+  .leaflet-control-layers, .leaflet-control-layers-expanded {{
+      background: {ink["surface"]} !important; color: {ink["primary"]}; }}
+  .leaflet-control-layers-toggle {{ filter: {"invert(1)" if mode == "dark" else "none"}; }}
+  .leaflet-control-layers label {{ color: {ink["primary"]}; }}
+  .leaflet-control-layers-separator {{ border-top-color: {ink["grid"]}; }}
+  .leaflet-bar a {{
+      background: {ink["surface"]}; color: {ink["primary"]};
+      border-bottom-color: {ink["grid"]}; }}
+  .leaflet-bar a:hover {{ background: {ink["grid"]}; }}
+  .leaflet-control-scale-line {{
+      background: {ink["surface"]}cc; color: {ink["secondary"]};
+      border: 1px solid {ink["grid"]}; border-radius: 4px; }}
+  .leaflet-control-attribution {{
+      background: {ink["surface"]}cc !important; color: {ink["muted"]} !important;
+      font-size: 10px; }}
+  .leaflet-control-attribution a {{ color: {ink["secondary"]} !important; }}
+  /* The colour-ramp legend, drawn by _ramp_legend below. */
+  .ems-legend {{
+      position: absolute; top: 10px; right: 10px; z-index: 900;
+      background: {ink["surface"]}f2; border: 1px solid {ink["grid"]};
+      border-radius: 8px; padding: 7px 10px 6px; font-family: {FONT};
+      box-shadow: 0 1px 2px rgba(0,0,0,.08); pointer-events: none; }}
+  .ems-legend .cap {{
+      font-size: 10px; font-weight: 600; letter-spacing: .04em;
+      text-transform: uppercase; color: {ink["muted"]};
+      display: block; margin-bottom: 5px; }}
+  .ems-legend .bar {{ height: 10px; border-radius: 3px; }}
+  .ems-legend .ends {{
+      display: flex; justify-content: space-between; gap: 18px;
+      font-size: 11px; color: {ink["secondary"]}; margin-top: 4px; }}
+</style>"""))
+    return m
 
 
-def map_demand(zones: pd.DataFrame, incidents: pd.DataFrame | None = None,
-               zip_geojson: dict | None = None) -> folium.Map:
+def _dot_icon(color: str, size: int = 18) -> folium.DivIcon:
+    """A plain filled dot in the app's own token colours.
+
+    Leaflet's default teardrop pin (folium.Icon) reads as generic map-product
+    chrome next to the rest of the app's minimal circle-marker style -- this
+    keeps every point marker on every map the same simple shape.
+    """
+    html = (
+        f'<div style="width:{size}px;height:{size}px;border-radius:50%;'
+        f'background:{color};border:2px solid #ffffff;'
+        f'box-shadow:0 1px 3px rgba(0,0,0,0.4);"></div>'
+    )
+    half = size // 2
+    return folium.DivIcon(html=html, icon_size=(size, size), icon_anchor=(half, half))
+
+
+def _ramp_legend(m: folium.Map, ramp, vmin: float, vmax: float, caption: str) -> None:
+    """Draw the sequential ramp's key in the app's own type and tokens.
+
+    branca's built-in legend is a d3 SVG on a fixed internal geometry: the
+    caption's baseline is pinned 21px below the group origin while the ramp
+    grows down from that same origin, so any ramp thick enough to read runs
+    straight through the caption, and the leftmost tick label is struck through
+    by the axis tick mark. Two numbers and a gradient is all this needs.
+    """
+    stops = ", ".join(ramp(vmin + (vmax - vmin) * i / 8.0) for i in range(9))
+    m.get_root().html.add_child(folium.Element(
+        f'<div class="ems-legend">'
+        f'<span class="cap">{caption}</span>'
+        f'<div class="bar" style="background:linear-gradient(90deg,{stops});"></div>'
+        f'<div class="ends"><span>{int(vmin):,}</span><span>{int(vmax):,}</span></div>'
+        f'</div>'))
+
+
+def map_demand(zones: pd.DataFrame, zip_geojson: dict | None = None) -> folium.Map:
     """Where demand concentrates -- graduated circles on a single-hue ramp."""
     m = _base_map()
     if zones.empty:
         return m
 
+    _s, _status, ink = tokens()
     vmin, vmax = float(zones["demand"].min()), float(zones["demand"].max())
-    ramp = cm.LinearColormap(SEQ_BLUE, vmin=vmin, vmax=vmax, caption="EMS incidents per zone")
+    # Kept for the colour lookup below; its own legend is replaced by
+    # _ramp_legend, which draws the key in the app's type rather than d3's.
+    ramp = cm.LinearColormap(seq(), vmin=vmin, vmax=vmax)
 
     if zip_geojson:
         lookup = dict(zip(zones["zip_code"].astype(str), zones["demand"]))
@@ -418,7 +581,7 @@ def map_demand(zones: pd.DataFrame, incidents: pd.DataFrame | None = None,
             style_function=lambda f: {
                 "fillColor": ramp(lookup.get(str(f["properties"].get("ZCTA5")), vmin))
                 if str(f["properties"].get("ZCTA5")) in lookup else "#00000000",
-                "color": "#7a7a7a", "weight": 0.6,
+                "color": ink["muted"], "weight": 0.5,
                 "fillOpacity": 0.55 if str(f["properties"].get("ZCTA5")) in lookup else 0.0,
             },
             tooltip=folium.GeoJsonTooltip(fields=["ZCTA5"], aliases=["ZIP:"]),
@@ -430,19 +593,14 @@ def map_demand(zones: pd.DataFrame, incidents: pd.DataFrame | None = None,
         folium.CircleMarker(
             location=[r["latitude"], r["longitude"]],
             radius=6 + 22 * (float(r["demand"]) / dmax) ** 0.5,
-            color="#ffffff", weight=1.5, fill=True,
+            color=ink["surface"], weight=1.5, fill=True,
             fill_color=ramp(float(r["demand"])), fill_opacity=0.85,
             tooltip=f"ZIP {r['zip_code']}: {int(r['demand']):,} EMS incidents",
         ).add_to(fg)
     fg.add_to(m)
 
-    if incidents is not None and len(incidents):
-        sample = incidents.sample(min(len(incidents), 4000), random_state=0)
-        HeatMap(sample[["latitude", "longitude"]].to_numpy().tolist(),
-                radius=11, blur=15, name="Incident heat", show=False).add_to(m)
-
-    ramp.add_to(m)
-    folium.LayerControl(collapsed=True).add_to(m)
+    _ramp_legend(m, ramp, vmin, vmax, "EMS incidents per zone")
+    folium.LayerControl(collapsed=True, position="topleft").add_to(m)
     return m
 
 
@@ -479,7 +637,7 @@ def map_coverage(result, existing: pd.DataFrame | None = None,
         folium.Marker(
             location=[r["latitude"], r["longitude"]],
             tooltip=f"{r.get('station', '')} — zone {r.get('zip_code', '')}",
-            icon=folium.Icon(color="blue", icon="plus-sign"),
+            icon=_dot_icon(s[1], size=20),
         ).add_to(fg_s)
         if show_radius:
             folium.Circle(
@@ -496,11 +654,11 @@ def map_coverage(result, existing: pd.DataFrame | None = None,
             folium.Marker(
                 location=[r["latitude"], r["longitude"]],
                 tooltip=f"{r.get('station_id', 'SFD')} — {r.get('address', '')}",
-                icon=folium.Icon(color="orange", icon="home"),
+                icon=_dot_icon(s[2], size=12),
             ).add_to(cluster)
         fg_e.add_to(m)
 
-    folium.LayerControl(collapsed=False).add_to(m)
+    folium.LayerControl(collapsed=True, position="topleft").add_to(m)
     return m
 
 
@@ -514,7 +672,7 @@ def map_dispatch(result, ambulances: pd.DataFrame) -> folium.Map:
         folium.Marker(
             location=[r["latitude"], r["longitude"]],
             tooltip=f"Unit {r.get('station', '')} — base zone {r.get('zip_code', '')}",
-            icon=folium.Icon(color="blue", icon="plus-sign"),
+            icon=_dot_icon(s[1], size=18),
         ).add_to(fg_b)
     fg_b.add_to(m)
 
@@ -538,100 +696,5 @@ def map_dispatch(result, ambulances: pd.DataFrame) -> folium.Map:
             ).add_to(fg_i)
     fg_i.add_to(m)
 
-    folium.LayerControl(collapsed=True).add_to(m)
+    folium.LayerControl(collapsed=True, position="topleft").add_to(m)
     return m
-
-
-# ---------------------------------------------------------------------------
-# Methodology flow diagram
-# ---------------------------------------------------------------------------
-
-def flow_diagram() -> str:
-    """The methodology slide, drawn rather than printed.
-
-    Renders the deck's pipeline sentence -- data in, clean & compute stats, AHP
-    ranks sites, two optimizations run, results on the map -- as an inline SVG.
-    It is drawn from the same ink/series tokens as every chart, so it reads as
-    part of the same system, and the covering -> assignment link is shown
-    explicitly because that linkage is the project's stated core contribution.
-    """
-    s, _status, ink = tokens()
-    FONT = "'Source Sans Pro', -apple-system, BlinkMacSystemFont, system-ui, sans-serif"
-    accent, edge, surf = s[1], ink["grid"], ink["surface"]
-
-    def box(x, y, w, h, eyebrow, title, strong=False):
-        stroke = accent if strong else edge
-        fill = f"{accent}14" if strong else surf
-        return (
-            f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="10" '
-            f'fill="{fill}" stroke="{stroke}" stroke-width="{2 if strong else 1.25}"/>'
-            f'<text x="{x + w / 2}" y="{y + (22 if h < 60 else 27)}" text-anchor="middle" '
-            f'font-family="{FONT}" font-size="10.5" font-weight="700" '
-            f'letter-spacing="0.09em" fill="{ink["muted"]}">{eyebrow}</text>'
-            f'<text x="{x + w / 2}" y="{y + (42 if h < 60 else 52)}" text-anchor="middle" '
-            f'font-family="{FONT}" font-size="14.5" font-weight="600" '
-            f'fill="{ink["primary"]}">{title}</text>'
-        )
-
-    p = [
-        '<svg viewBox="0 0 1182 196" width="100%" role="img" '
-        'aria-label="Pipeline: Seattle 911 data in, clean and compute statistics, '
-        'AHP ranks sites, covering and assignment optimizations run, results on the map." '
-        'xmlns="http://www.w3.org/2000/svg">',
-        f'<defs><marker id="fa" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" '
-        f'orient="auto"><path d="M0,0 L7.5,3.2 L0,6.4 z" fill="{ink["muted"]}"/></marker>'
-        f'<marker id="fb" markerWidth="9" markerHeight="9" refX="7.5" refY="3.2" '
-        f'orient="auto"><path d="M0,0 L7.5,3.2 L0,6.4 z" fill="{accent}"/></marker></defs>',
-    ]
-
-    # Stages 1-3 and 5 sit on the spine; stage 4 splits into the two models.
-    p.append(box(10, 64, 186, 72, "DATA IN", "Seattle 911 feed"))
-    p.append(box(238, 64, 186, 72, "STEP 1", "Clean &amp; compute stats"))
-    p.append(box(466, 64, 186, 72, "STEP 2", "AHP ranks sites"))
-    p.append(box(694, 29, 250, 54, "STEP 3 · ILP", "Covering model", strong=True))
-    p.append(box(694, 117, 250, 54, "STEP 4 · LP", "Assignment model", strong=True))
-    p.append(box(986, 64, 186, 72, "OUTPUT", "Results on the map"))
-
-    def arrow(x1, x2, y=100):
-        return (f'<line x1="{x1}" y1="{y}" x2="{x2}" y2="{y}" stroke="{ink["muted"]}" '
-                f'stroke-width="1.5" marker-end="url(#fa)"/>')
-
-    p.append(arrow(200, 232))
-    p.append(arrow(428, 460))
-    # Fork from AHP into the covering model, which is what consumes the ranking.
-    p.append(f'<path d="M656,100 H676 V56 H{694 - 10}" fill="none" '
-             f'stroke="{ink["muted"]}" stroke-width="1.5" marker-end="url(#fa)"/>')
-    # The core contribution: covering output becomes the assignment model's bases.
-    p.append(f'<path d="M760,83 V{117 - 10}" fill="none" stroke="{accent}" '
-             f'stroke-width="2" marker-end="url(#fb)"/>')
-    p.append(f'<text x="774" y="105" font-family="{FONT}" font-size="11" '
-             f'font-style="italic" fill="{accent}">stations become ambulance bases</text>')
-    # Both models merge into the map.
-    p.append(f'<path d="M944,56 H966 V100 H{986 - 10}" fill="none" '
-             f'stroke="{ink["muted"]}" stroke-width="1.5" marker-end="url(#fa)"/>')
-    p.append(f'<path d="M944,144 H966 V100" fill="none" '
-             f'stroke="{ink["muted"]}" stroke-width="1.5"/>')
-
-    p.append("</svg>")
-    return "".join(p)
-
-
-def team_strip(course: str, members: list[tuple[str, str]]) -> str:
-    """The deck's 'presented by' row, in the app's own tokens."""
-    _s, _status, ink = tokens()
-    FONT = "'Source Sans Pro', -apple-system, BlinkMacSystemFont, system-ui, sans-serif"
-    cells = "".join(
-        f'<div style="flex:1 1 180px;min-width:0">'
-        f'<div style="font-family:{FONT};font-size:14.5px;font-weight:600;'
-        f'color:{ink["primary"]}">{name}</div>'
-        f'<div style="font-family:{FONT};font-size:12px;color:{ink["muted"]};'
-        f'letter-spacing:0.03em">{roll}</div></div>'
-        for name, roll in members
-    )
-    return (
-        f'<div style="border-top:1px solid {ink["grid"]};margin-top:8px;padding-top:14px">'
-        f'<div style="font-family:{FONT};font-size:10.5px;font-weight:700;'
-        f'letter-spacing:0.09em;color:{ink["muted"]};margin-bottom:10px">'
-        f'PRESENTED BY · {course.upper()}</div>'
-        f'<div style="display:flex;flex-wrap:wrap;gap:18px 24px">{cells}</div></div>'
-    )

@@ -52,50 +52,44 @@ if at.exception:
     sys.exit(1)
 
 check("title rendered", any("EMS Dispatch" in t.value for t in at.title))
-check("all six tabs present", len(at.tabs) >= 6, f"{len(at.tabs)} tabs")
 check("sidebar controls present", len(at.sidebar.slider) >= 4,
       f"{len(at.sidebar.slider)} sliders, {len(at.sidebar.selectbox)} selectboxes")
-check("KPI metrics rendered", len(at.metric) >= 10, f"{len(at.metric)} metrics")
 check("dataframes rendered", len(at.dataframe) >= 5, f"{len(at.dataframe)} tables")
 
-# The AHP tab computes on every run, so its consistency metrics must be present.
+# --- presentation layer -------------------------------------------------
+# The app is one tab per stage of the pipeline, and the site-scoring stage
+# nests one tab per team member filling the comparison table independently.
+tab_labels = [t.label for t in at.main.get("tab")]
+STAGES = ("Data", "Site scoring", "Station placement", "Dispatch")
+check("every pipeline stage has a tab",
+      all(any(s in lbl for lbl in tab_labels) for s in STAGES),
+      ", ".join(STAGES))
+check("one AHP tab per team member",
+      all(f"Member {i + 1}" in tab_labels for i in range(len(config.TEAM))),
+      f"{len(config.TEAM)} members")
+
+# The section headings carry the page's structure, so they are checked like
+# any other output rather than eyeballed.
+headings = [s.value for s in at.subheader]
+# Each heading is the narrative line for its section; the chart inside states
+# the measure ("Top 15 ZIP zones by EMS incident count"), so the two no longer
+# repeat each other and the headings are checked on their own wording.
+SECTIONS = ("Where demand concentrates", "When load spikes", "Demand weights",
+            "Judgement consistency", "Candidate sites", "Threshold sensitivity",
+            "Benchmark vs. real stations")
+check("every section heading rendered",
+      all(any(s in h for h in headings) for s in SECTIONS),
+      f"{len(headings)} headings")
+
 metric_labels = [m.label for m in at.metric]
+HEADLINE = ("EMS incidents", "Demand zones", "Avg per day", "Busiest zone",
+            "Peak hour")
+check("headline KPIs rendered", all(k in metric_labels for k in HEADLINE),
+      f"{len(at.metric)} metrics")
+
+# The AHP tab computes on every run, so its consistency metrics must be present.
 check("AHP consistency metrics shown",
       all(k in metric_labels for k in ("λmax", "CI", "RI", "CR")))
-
-# --- presentation layer -------------------------------------------------
-# The deck's title slide and methodology diagram are part of the deliverable,
-# so they are checked like any other output rather than eyeballed.
-html_blob = "".join(e.body for e in at.main if e.type == "html")
-tab_labels = [t.label for t in at.main.get("tab")]
-
-check("methodology flow diagram rendered",
-      "<svg" in html_blob and "Seattle 911 feed" in html_blob)
-check("flow diagram shows both optimisations",
-      "Covering model" in html_blob and "Assignment model" in html_blob)
-check("flow diagram labels the covering -> assignment linkage",
-      "stations become ambulance bases" in html_blob)
-check("team roster rendered with names and roll numbers",
-      all(n in html_blob for n, _ in config.TEAM)
-      and all(r in html_blob for _, r in config.TEAM),
-      f"{len(config.TEAM)} members")
-check("AHP member tabs are named after the team",
-      all(n.split()[0] in tab_labels for n, _ in config.TEAM),
-      ", ".join(n.split()[0] for n, _ in config.TEAM))
-
-# The deck's narrative slides -- the four objectives and the tool list -- are
-# stated in the Overview so the app can be walked through against the deck.
-prose = ("".join(str(e.value) for e in at.markdown)
-         + "".join(str(e.value) for e in at.caption))
-OBJECTIVES = ("Interactive data exploration", "Optimal station placement",
-              "Optimal dispatch", "Visual decision support")
-TOOLS = ("Python + pandas", "PuLP", "Streamlit", "Folium / Plotly",
-         "Haversine", "Data ingestion")
-check("all four project objectives stated",
-      all(o in prose for o in OBJECTIVES), f"{len(OBJECTIVES)} objectives")
-check("project significance stated",
-      "oldest and most" in prose and "real city with" in prose)
-check("all six tools listed", all(t in prose for t in TOOLS), f"{len(TOOLS)} tools")
 
 # --- drive the covering model ------------------------------------------
 buttons = {b.label: b for b in at.button}
@@ -117,11 +111,12 @@ if target:
     print(f"   -> {opened} stations opened, {covered} of demand covered")
 
 # --- Mode B: maximal covering ------------------------------------------
-mode_radio = next((r for r in at.radio if any("Mode A" in str(o) for o in r.options)), None)
-check("covering mode radio present", mode_radio is not None)
-if mode_radio:
-    mode_b = next(o for o in mode_radio.options if "Mode B" in str(o))
-    mode_radio.set_value(mode_b).run()
+mode_sel = next((r for r in at.segmented_control
+                 if any("Mode A" in str(o) for o in r.options)), None)
+check("covering mode selector present", mode_sel is not None)
+if mode_sel:
+    mode_b = next(o for o in mode_sel.options if "Mode B" in str(o))
+    mode_sel.set_value(mode_b).run()
     check("switching to maximal covering renders", not at.exception,
           "; ".join(exceptions(at)))
     b = {btn.label: btn for btn in at.button}
@@ -137,7 +132,7 @@ if mode_radio:
         check("maximal covering results rendered", "Demand covered" in lbls)
         print(f"   -> Mode B: {opened} stations, {covered} of demand covered")
     # back to Mode A so later steps use the set-covering result
-    mode_radio.set_value(next(o for o in mode_radio.options if "Mode A" in str(o))).run()
+    mode_sel.set_value(next(o for o in mode_sel.options if "Mode A" in str(o))).run()
 
 # --- threshold sweep ----------------------------------------------------
 buttons = {b.label: b for b in at.button}
@@ -219,28 +214,23 @@ pool = next((sl for sl in at.slider if "Candidate sites" in sl.label), None)
 if pool:
     pool.set_value(int(pool.min)).run()
     check("smallest candidate pool renders", not at.exception, "; ".join(exceptions(at)))
-    mode_r = next((r for r in at.radio if any("Mode A" in str(o) for o in r.options)), None)
+    mode_r = next((r for r in at.segmented_control
+                   if any("Mode A" in str(o) for o in r.options)), None)
     if mode_r:
         mode_r.set_value(next(o for o in mode_r.options if "Mode B" in str(o))).run()
         check("budget slider survives the smallest pool", not at.exception,
               "; ".join(exceptions(at)))
-        mode_r = next(r for r in at.radio if any("Mode A" in str(o) for o in r.options))
+        mode_r = next(r for r in at.segmented_control
+                      if any("Mode A" in str(o) for o in r.options))
         mode_r.set_value(next(o for o in mode_r.options if "Mode A" in str(o))).run()
     pool = next(sl for sl in at.slider if "Candidate sites" in sl.label)
     pool.set_value(int(pool.max)).run()
 
-# Every Decision Map layer must render -- it is the deck's fourth objective.
-layers_ok = True
-dm = next((r for r in at.radio if any("Demand by zone" in str(o) for o in r.options)), None)
-if dm is None:
-    layers_ok = False
-else:
-    for layer in list(dm.options):
-        r = next(x for x in at.radio if any("Demand by zone" in str(o) for o in x.options))
-        r.set_value(layer).run()
-        if at.exception:
-            layers_ok = False
-check("all Decision Map layers render", layers_ok, "demand, placement, dispatch")
+# Each stage ends on a map, and a Folium map that fails to build takes the
+# whole script down -- so all three are required to be on the page at once.
+maps = [e for e in at.main if e.type == "component_instance"]
+check("all three maps render", len(maps) == 3,
+      f"{len(maps)} of 3 — demand, coverage, dispatch")
 
 print("\n" + "=" * 72)
 print(f"   {passed} passed, {failed} failed")

@@ -1,16 +1,74 @@
-# Pinned so the app looks identical on any machine it is demonstrated from,
-# instead of inheriting whatever the presenting laptop's OS theme happens to be.
-# The palette is the light half of the token set in src/viz.py, so the Streamlit
-# chrome and every Plotly chart read as one system. Viewers can still switch
-# theme from the toolbar menu; the charts follow via viz.theme().
+# The palette is the token set in src/viz.py, so the Streamlit chrome and every
+# Plotly chart read as one system: SERIES slot 1 is the primary colour, INK
+# "grid" is the border colour that draws every card, and the STATUS pair backs
+# the success/error callouts.
+#
+# Both modes are defined, so the viewer gets their own system preference and can
+# switch from the toolbar menu; src/viz.py selects the matching half of its
+# tokens via viz.theme(). Folium tiles stay light in both modes -- CartoDB's
+# free dark tiles now require an API key (see src/viz.py), so the maps are the
+# one element that does not follow the dark theme.
 
 [theme]
-base = "light"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@600;700&display=swap"
+baseFontSize = 15
+baseFontWeight = 400
+headingFontSizes = ["30px", "23px", "19px", "16px", "14px", "13px"]
+headingFontWeights = [700, 600, 600, 600, 600, 600]
+baseRadius = "8px"
+buttonRadius = "8px"
+showWidgetBorder = true
+showSidebarBorder = true
+linkUnderline = false
+
+[theme.light]
 primaryColor = "#2a78d6"
 backgroundColor = "#ffffff"
 secondaryBackgroundColor = "#f4f4f1"
 textColor = "#0b0b0b"
-font = "sans serif"
+borderColor = "#e4e3df"
+linkColor = "#1d5da6"
+codeBackgroundColor = "#f4f4f1"
+dataframeBorderColor = "#e4e3df"
+dataframeHeaderBackgroundColor = "#f4f4f1"
+blueColor = "#2a78d6"
+greenColor = "#008300"
+orangeColor = "#eda100"
+redColor = "#e34948"
+grayColor = "#52514e"
+chartCategoricalColors = ["#2a78d6", "#eb6834", "#1baf7a", "#1d5da6", "#8a8985"]
+
+[theme.light.sidebar]
+backgroundColor = "#f4f4f1"
+secondaryBackgroundColor = "#e9e8e3"
+codeBackgroundColor = "#e9e8e3"
+borderColor = "#e4e3df"
+
+[theme.dark]
+primaryColor = "#3987e5"
+backgroundColor = "#1a1a19"
+secondaryBackgroundColor = "#242423"
+textColor = "#ffffff"
+borderColor = "#33322f"
+linkColor = "#6aa2e0"
+codeBackgroundColor = "#242423"
+dataframeBorderColor = "#33322f"
+dataframeHeaderBackgroundColor = "#242423"
+blueColor = "#3987e5"
+# The chart "good" green (#008300) is too dark to read as a callout on a near
+# black surface, so the dark mode borrows SERIES slot 3 instead.
+greenColor = "#199e70"
+orangeColor = "#c98500"
+redColor = "#e66767"
+grayColor = "#8f8e86"
+chartCategoricalColors = ["#3987e5", "#d95926", "#199e70", "#6aa2e0", "#8f8e86"]
+
+[theme.dark.sidebar]
+backgroundColor = "#141413"
+secondaryBackgroundColor = "#242423"
+codeBackgroundColor = "#141413"
+borderColor = "#33322f"
 
 [client]
 toolbarMode = "minimal"
