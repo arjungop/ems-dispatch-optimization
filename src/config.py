@@ -8,11 +8,43 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 RAW = DATA / "raw"
 PROCESSED = DATA / "processed"
+DEPLOY = DATA / "deploy"
+
+# --------------------------------------------------------------------------
+# Where the data lives
+# --------------------------------------------------------------------------
+# Two datasets, one app.
+#
+#   Locally, `download_data.py` + `preprocess.py` produce the full feed: 2.2M
+#   calls back to 2010, 61 MB of Parquet that peaks around 615 MB resident.
+#   Both are gitignored -- the raw CSV is 191 MB, past GitHub's hard limit.
+#
+#   Deployed, there is no download step and a free container has about 1 GB of
+#   memory for the whole process, Streamlit and Plotly included. `data/deploy/`
+#   holds a committed slice sized for that: the most recent DEPLOY_YEARS of the
+#   same cleaned table, ~11 MB on disk and ~48 MB resident, next to the two raw
+#   reference files that are small enough to commit as they are.
+#
+# The full set wins wherever it exists, so a local checkout keeps the complete
+# history and a fresh clone still runs. Paths below are *read* paths; the
+# canonical write targets are the explicit _FULL/RAW names, so regenerating the
+# full dataset can never overwrite the committed slice.
+DEPLOY_YEARS = 5
 
 CALLS_CSV = RAW / "seattle_911_calls.csv"
-STATIONS_CSV = RAW / "seattle_fire_stations.csv"
-ZCTA_GEOJSON = RAW / "seattle_zcta.geojson"
-CALLS_PARQUET = PROCESSED / "ems_incidents.parquet"
+CALLS_PARQUET_FULL = PROCESSED / "ems_incidents.parquet"
+
+
+def _resolve(full: Path, deployed: Path) -> Path:
+    """The full dataset if this checkout has it, else the committed slice."""
+    return full if full.exists() else deployed
+
+
+CALLS_PARQUET = _resolve(CALLS_PARQUET_FULL, DEPLOY / "ems_incidents.parquet")
+STATIONS_CSV = _resolve(RAW / "seattle_fire_stations.csv",
+                        DEPLOY / "seattle_fire_stations.csv")
+ZCTA_GEOJSON = _resolve(RAW / "seattle_zcta.geojson",
+                        DEPLOY / "seattle_zcta.geojson")
 
 # --------------------------------------------------------------------------
 # EMS call taxonomy

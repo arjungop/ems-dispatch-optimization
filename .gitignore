@@ -6,6 +6,12 @@ data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 
+# data/deploy/ IS committed, and deliberately: it is the ~12 MB slice the hosted
+# app runs on, because a deployed container has no download step and about 1 GB
+# of memory. Rebuild it with `python scripts/make_deploy_data.py`; see the path
+# resolution at the top of src/config.py for how the full local dataset takes
+# precedence over it.
+
 # Generated preview page (scripts/render_charts.py)
 charts_preview.html
 

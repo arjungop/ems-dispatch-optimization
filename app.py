@@ -49,6 +49,38 @@ def tbl_height(n_rows: int, max_rows: int) -> int:
     return ROW_PX * (min(int(n_rows), max_rows) + 1) + 2
 
 
+def fitted_height(n_rows: int, px: int) -> int:
+    """A table height that ends on a row boundary at or just under ``px``.
+
+    For pairing a table against something whose height is a plain number -- a
+    Folium map, which streamlit-folium takes in pixels -- rather than against
+    a figure.
+    """
+    return tbl_height(n_rows, max(3, (px - 2) // ROW_PX - 1))
+
+
+# The vertical space a bold `st.markdown` caption line takes inside a card.
+# Where the table card carries one and the chart card does not -- the chart's
+# own title lives inside the figure -- the table has that much less room if the
+# two cards are to end together.
+CARD_LABEL_PX = 38
+
+
+def paired_height(n_rows: int, chart, label: bool = False) -> int:
+    """A table height that lands on the same line as the chart beside it.
+
+    Almost every section here is a chart in one card next to its table in
+    another, and the pair only reads as a single row if both cards end
+    together. Capping the table at an arbitrary row count does not do that:
+    the 15-bar ranked chart is 500px tall while ``tbl_height(15, 15)`` is 530,
+    and a 7-row result table beside a 10-row one leaves a 99px step. Deriving
+    the cap from the figure's own height keeps the two within one row pitch of
+    each other whatever the data does.
+    """
+    px = viz.chart_height(chart) - (CARD_LABEL_PX if label else 0)
+    return fitted_height(n_rows, px)
+
+
 def count_col(label: str, **kw):
     return st.column_config.NumberColumn(label, format="localized", **kw)
 
@@ -65,8 +97,17 @@ def km_col(label: str, **kw):
     return st.column_config.NumberColumn(label, format="%.2f km", **kw)
 
 
-def rank_col(label: str = "#"):
-    return st.column_config.NumberColumn(label, format="%d", width="small")
+def fmt_seconds(s: float) -> str:
+    """A solve time that stays a measurement at every scale.
+
+    These models solve in single-digit milliseconds on a laptop, and a fixed
+    ``%.2f`` renders that as "0.00s" -- which reads as a stopwatch that never
+    started rather than as the headline that an exact ILP over the whole city
+    is instant.
+    """
+    if s < 1.0:
+        return f"{s * 1000:.0f} ms"
+    return f"{s:.2f} s"
 
 
 # ---------------------------------------------------------------------------
@@ -102,11 +143,19 @@ def travel_kwargs() -> dict:
     }
 
 
+# A tile wide enough for the longest label the app puts on one ("Response-time
+# limit", "Served / unserved") and short enough that five fit the content area
+# at a 13-inch laptop width. Fixing it is what stops a wrapped tile from
+# stretching -- see ``kpi_row``.
+KPI_W = 196
+
+
 def kpi(col, label: str, value: str, icon: str | None = None, border: bool = True,
-        help_text: str | None = None):
+        help_text: str | None = None, width: int | str = KPI_W):
     # Metrics are their own cards, except where they already sit inside one --
     # a bordered card nested in a bordered card reads as clutter.
-    col.metric(label, value, icon=icon, border=border, help=help_text)
+    col.metric(label, value, icon=icon, border=border, help=help_text,
+               width=width)
 
 
 def kpi_row():
@@ -117,6 +166,13 @@ def kpi_row():
     Streamlit ellipsises the tiles -- "EMS incidents / 79,152" renders as
     "EMS inci... / 79,...". A horizontal container keeps each tile at its
     natural size and moves the overflow onto a second line instead.
+
+    The tiles carry a fixed ``KPI_W`` rather than the default ``width="stretch"``
+    because stretch is what makes wrapping look broken: below about 1400px the
+    fifth tile drops to its own line and then expands to the full page width,
+    so "Peak hour / 13:00" renders as a banner three times the size of the four
+    tiles above it. At a fixed width the overflow row just starts a new, evenly
+    sized rank.
     """
     return st.container(horizontal=True, horizontal_alignment="left")
 
@@ -277,28 +333,43 @@ with tabs[0]:
     by_wd = stats.calls_by_weekday(sel)
 
     st.subheader("Where demand concentrates", divider="gray")
-    # The ranked chart is sized by its 15 bars; the table beside it is pinned to
-    # the same number of rows so the two cards end on the same line.
+    TOP_N = 15
+    top_zones = zone_stats.head(TOP_N)
+    # The cumulative share is the headline the column was there to deliver --
+    # "the top 15 zones carry 80% of the city's demand" -- and as a column it
+    # was the first thing to fall off the right edge of a narrow window. Said
+    # once in the caption it is both safe and easier to read than 15 running
+    # totals, and it buys the four remaining columns enough width to survive a
+    # 13-inch laptop.
+    top_share = float(top_zones["share_pct"].sum())
+    fig_zones = viz.chart_busiest_zones(zone_stats, top_n=TOP_N)
+
     c1, c2 = st.columns([3, 2], vertical_alignment="top")
     with c1:
         with st.container(border=True):
-            st.plotly_chart(viz.chart_busiest_zones(zone_stats), width="stretch")
+            st.plotly_chart(fig_zones, width="stretch")
     with c2:
         with st.container(border=True):
             st.dataframe(
-                zone_stats,
+                top_zones,
                 hide_index=True, width="stretch",
-                height=tbl_height(len(zone_stats), 15),
-                column_order=["rank", "zip_code", "incidents", "share_pct",
-                              "cumulative_pct"],
+                height=paired_height(len(top_zones), fig_zones),
+                # Three columns. In the two-fifths card this sits in -- 255px
+                # at a 13-inch laptop width -- a fourth does not fit, and the
+                # rank is the one worth losing: the rows are already in rank
+                # order beside a chart that is itself a ranking.
+                column_order=["zip_code", "incidents", "share_pct"],
                 column_config={
-                    "rank": rank_col(),
                     "zip_code": st.column_config.TextColumn("ZIP", width="small"),
                     "incidents": count_col("Incidents"),
                     "share_pct": pct_col("Share"),
-                    "cumulative_pct": pct_col("Cumulative"),
                 },
             )
+    st.caption(
+        f"The {len(top_zones)} busiest ZIP zones carry **{top_share:.1f}%** of all "
+        f"{len(sel):,} EMS incidents in this period — demand is concentrated enough "
+        "that placing stations against it beats spreading them evenly."
+    )
 
     st.subheader("When load spikes", divider="gray")
     c1, c2 = st.columns(2, vertical_alignment="top")
@@ -322,16 +393,25 @@ with tabs[0]:
     # a 200px cell and read as a half-empty table.
     st.subheader("Demand weights fed into both optimisations", divider="gray")
     weights_tbl = stats.demand_weights(zones)
-    c1, c2 = st.columns([2, 3], vertical_alignment="top")
+    # Even weighting rather than [2, 3]: three columns including a progress bar
+    # need about 300px and the two-fifths split left the table 255.
+    c1, c2 = st.columns([1, 1], vertical_alignment="top")
     with c1:
         with st.container(border=True):
             st.markdown("**Weight per zone**")
+            # Matched to the map's caption so both cards carry a header and one
+            # caption line above their body and therefore end together.
+            st.caption("Every zone enters the covering model weighted by its "
+                       "incident count; the bar is that weight relative to the "
+                       "busiest zone.")
+            # The rank column is dropped rather than squeezed: the rows are
+            # already in rank order, and at a laptop width the four columns
+            # left the progress bar with no room to draw.
             st.dataframe(
                 weights_tbl, hide_index=True, width="stretch",
-                height=tbl_height(len(weights_tbl), 15),
-                column_order=["rank", "zip_code", "demand", "weight_pct"],
+                height=fitted_height(len(weights_tbl), MAP_H),
+                column_order=["zip_code", "demand", "weight_pct"],
                 column_config={
-                    "rank": rank_col(),
                     "zip_code": st.column_config.TextColumn("ZIP", width="small"),
                     "demand": count_col("Incidents"),
                     "weight_pct": st.column_config.ProgressColumn(
@@ -365,15 +445,40 @@ with tabs[1]:
     LBL = {v: (f"1/{round(1 / v)}" if v < 1 else f"{v:g}") for v in SAATY}
     PAIRS = [(0, 1), (0, 2), (1, 2)]
 
+    # Saaty's verbal anchors. The slider renders its position as a bare number
+    # and draws no labels at either end, so on screen a judgement is the digit
+    # "3" on a track with no scale and no direction -- unreadable as the
+    # intensity *and* the direction of a preference, which is the whole content
+    # of an AHP comparison. Each slider states its reading in words underneath.
+    SAATY_WORDS = {
+        1: "equally important", 2: "slightly", 3: "moderately",
+        4: "moderately to strongly", 5: "strongly",
+        6: "strongly to very strongly", 7: "very strongly",
+        8: "very strongly to extremely", 9: "extremely",
+    }
+
+    def saaty_phrase(v: float, a: str, b: str) -> str:
+        """The slider's position, read back as the sentence it encodes."""
+        if abs(v - 1.0) < 1e-9:
+            return f"**{a}** and **{b}** matter equally"
+        hi, lo, k = (a, b, v) if v > 1 else (b, a, 1.0 / v)
+        return f"**{hi}** is {SAATY_WORDS[round(k)]} more important than **{lo}**"
+
     with st.container(border=True):
         st.markdown("**Pairwise judgements**")
         # A number input left to its own devices stretches the full width of a
         # wide-layout page, which makes a one-digit control look like a text
         # field; it is held to a readable width here instead.
-        n_members = st.columns([1, 3])[0].number_input(
+        head_l, head_r = st.columns([1, 3], vertical_alignment="bottom")
+        n_members = head_l.number_input(
             "Team members", 1, 8, len(config.TEAM), 1,
             help="Each member fills the comparison table independently; their "
                  "matrices are aggregated into one set of weights.",
+        )
+        head_r.caption(
+            "**Saaty's 1–9 scale** —  1 equal · 3 moderate · 5 strong · "
+            "7 very strong · 9 extreme, with 2, 4, 6, 8 in between. A reciprocal "
+            "(1/3, 1/5 …) points the same intensity the other way."
         )
 
         per_member = []
@@ -399,6 +504,8 @@ with tabs[1]:
                               f"{b}: {config.AHP_CRITERIA_HELP[b]}  \n"
                               f"Above 1 favours {a}; below 1 favours {b}."),
                     )
+                    cols[pi].caption(
+                        f"1/9 ◄ {LBL[val]} ► 9 — {saaty_phrase(val, a, b)}")
                     comp[(i, j)] = val
                 per_member.append(comp)
 
@@ -446,60 +553,76 @@ with tabs[1]:
                          "other. Revise the comparisons before using these weights.",
                          icon=":material/error:")
 
-            with st.expander("Per-member consistency", icon=":material/group:"):
-                per_member_tbl = pd.DataFrame([
-                    {"Member": member_labels[p["member"] - 1],
-                     "λmax": p["lambda_max"], "CI": p["CI"], "CR": p["CR"],
-                     "Consistent": bool(p["consistent"]),
-                     **{SHORT[c]: w for c, w in zip(result.criteria, p["weights"])}}
-                    for p in result.per_member
-                ])
-                st.dataframe(
-                    per_member_tbl, hide_index=True, width="stretch",
-                    height=tbl_height(len(per_member_tbl), 8),
-                    column_config={
-                        "λmax": st.column_config.NumberColumn(format="%.4f"),
-                        "CI": st.column_config.NumberColumn(format="%.4f"),
-                        "CR": st.column_config.NumberColumn(format="%.4f"),
-                        "Consistent": st.column_config.CheckboxColumn(
-                            help="CR below 0.10."),
-                        **{SHORT[c]: st.column_config.NumberColumn(
-                            SHORT[c], format="percent")
-                           for c in result.criteria},
-                    },
-                )
+            # Shown open rather than behind an expander. "Did every member's
+            # own matrix pass CR < 0.10, or is one of them carrying the
+            # aggregate?" is the first question asked of a group AHP, and the
+            # aggregated CR above cannot answer it -- a geometric mean of four
+            # inconsistent matrices can still come out consistent. It is also
+            # what balances this card against the matrix card beside it.
+            st.markdown("**Per-member consistency**")
+            # Three columns, not six. The per-member criterion weights were
+            # also here, and six columns in a two-fifths card cut the last one
+            # off mid-header ("Cov…") with its values clipped beside it. The
+            # question this table exists to answer is whether each member's own
+            # matrix passes, so it keeps the CR and the verdict; the weights
+            # that actually drive the model are the aggregated ones charted in
+            # the card to the left.
+            per_member_tbl = pd.DataFrame([
+                {"Member": member_labels[p["member"] - 1],
+                 "CR": p["CR"], "Consistent": bool(p["consistent"])}
+                for p in result.per_member
+            ])
+            st.dataframe(
+                per_member_tbl, hide_index=True, width="stretch",
+                height=tbl_height(len(per_member_tbl), 8),
+                column_config={
+                    "Member": st.column_config.TextColumn(width="small"),
+                    "CR": st.column_config.NumberColumn(
+                        format="%.4f", width="small",
+                        help="Consistency Ratio for this member's own matrix."),
+                    "Consistent": st.column_config.CheckboxColumn(
+                        "Passes", width="small",
+                        help="CR below 0.10 — this member's matrix is consistent "
+                             "on its own, not merely after aggregation."),
+                },
+            )
 
     st.subheader("Candidate sites ranked by priority", divider="gray")
     scored = ahp_mod.score_sites(zones, existing_stations, result, threshold, **tk)
     st.session_state["ahp_result"] = result
     st.session_state["ahp_scored"] = scored
 
+    fig_rank = viz.chart_ahp_ranking(scored)
     c1, c2 = st.columns([2, 3], vertical_alignment="top")
     with c1:
         with st.container(border=True):
-            st.plotly_chart(viz.chart_ahp_ranking(scored), width="stretch")
+            st.plotly_chart(fig_rank, width="stretch")
     with c2:
         with st.container(border=True):
             st.markdown("**Criterion values behind each score**")
+            # The rank column is gone: the rows are in rank order and the chart
+            # beside them is a ranking, so it was a column of width spent
+            # restating the row position -- width the three criterion values
+            # need to stay on screen at a laptop size.
             st.dataframe(
                 scored, hide_index=True, width="stretch",
-                height=tbl_height(len(scored), 15),
-                column_order=["rank", "zip_code", "Incident Density", "Equity Gap",
-                              "Coverage Potential", "zones_reached", "ahp_score"],
+                height=paired_height(len(scored), fig_rank, label=True),
+                # Five columns, not six: "zones_reached" is a second reading of
+                # Coverage Potential (the zones behind the demand already in
+                # the column next to it), and at a laptop width it was the
+                # column that pushed the priority score itself off the edge.
+                column_order=["zip_code", "Incident Density", "Equity Gap",
+                              "Coverage Potential", "ahp_score"],
                 column_config={
-                    "rank": rank_col(),
                     "zip_code": st.column_config.TextColumn("ZIP", width="small"),
                     "Incident Density": count_col(
                         "Incidents", help="Emergencies in the zone."),
                     "Equity Gap": km_col(
-                        "Nearest station",
+                        "Nearest stn",
                         help="Distance to the closest station Seattle already runs."),
                     "Coverage Potential": count_col(
-                        "Demand in reach",
+                        "In reach",
                         help="Incidents reachable from here inside the limit."),
-                    "zones_reached": count_col(
-                        "Zones", width="small",
-                        help="Demand zones reachable from here inside the limit."),
                     "ahp_score": st.column_config.NumberColumn(
                         "Priority", format="%.3f", width="small"),
                 },
@@ -592,7 +715,9 @@ with tabs[2]:
         kpi(k, "Zones covered", f"{res.zones_covered}/{res.zones_total}",
             icon=":material/map:")
         kpi(k, "Solver status", res.status, icon=":material/check_circle:")
-        kpi(k, "Solve time", f"{res.solve_seconds:.2f}s", icon=":material/timer:")
+        kpi(k, "Solve time", fmt_seconds(res.solve_seconds),
+            icon=":material/timer:",
+            help_text="Wall-clock time in the ILP solver for this run.")
 
         if res.uncoverable:
             st.warning(
@@ -606,27 +731,47 @@ with tabs[2]:
         zone_table = res.zone_table.assign(
             status=np.where(res.zone_table["covered"], "Covered", "Not covered"))
 
+        # Both result tables are given the same number of visible rows, set by
+        # whichever has fewer. Sized independently they step against each other
+        # -- seven opened stations beside ten zones left a 99px ledge between
+        # the two cards -- and padding the shorter one to match would fill it
+        # with blank filler rows instead, which reads as an unfinished table.
+        pair_rows = max(5, min(len(res.chosen), len(zone_table), 10))
+        pair_px = tbl_height(pair_rows, pair_rows)
+
         c1, c2 = st.columns([2, 3], vertical_alignment="top")
         with c1:
             with st.container(border=True):
                 st.markdown("**Stations opened**")
+                # The latitude and longitude that used to be here could not fit
+                # this card -- it is 255px wide at a 13-inch laptop size, and a
+                # readable coordinate pair needs 150 of that on its own. They
+                # are also the least useful thing to put in it: the map
+                # directly below plots every one of these stations. The column
+                # that replaces them answers the question the table is actually
+                # asked, which is what each opened station is for.
+                workload = (zone_table[zone_table["covered"]]
+                            .groupby("nearest_station_zone", observed=True)["demand"]
+                            .sum())
+                chosen = res.chosen.assign(serves=[
+                    int(workload.get(z, 0)) for z in res.chosen["zip_code"]])
                 st.dataframe(
-                    res.chosen, hide_index=True, width="stretch",
-                    height=tbl_height(len(res.chosen), 10),
-                    column_order=["station", "zip_code", "latitude", "longitude"],
+                    chosen, hide_index=True, width="stretch", height=pair_px,
+                    column_order=["station", "zip_code", "serves"],
                     column_config={
                         "station": st.column_config.TextColumn("Station", width="small"),
                         "zip_code": st.column_config.TextColumn("Zone", width="small"),
-                        "latitude": st.column_config.NumberColumn("Lat", format="%.4f"),
-                        "longitude": st.column_config.NumberColumn("Lon", format="%.4f"),
+                        "serves": count_col(
+                            "Serves",
+                            help="Incidents in the zones this station is the "
+                                 "nearest opened station for, inside the limit."),
                     },
                 )
         with c2:
             with st.container(border=True):
                 st.markdown("**Per-zone outcome**")
                 st.dataframe(
-                    zone_table, hide_index=True, width="stretch",
-                    height=tbl_height(len(zone_table), 10),
+                    zone_table, hide_index=True, width="stretch", height=pair_px,
                     column_order=["zip_code", "demand", "status",
                                   "nearest_station_zone", "response_min"],
                     column_config={
@@ -634,8 +779,9 @@ with tabs[2]:
                         "demand": count_col("Incidents"),
                         "status": st.column_config.TextColumn("Status", width="small"),
                         "nearest_station_zone": st.column_config.TextColumn(
-                            "Served from", width="small"),
-                        "response_min": min_col("Response"),
+                            "From", width="small",
+                            help="The opened station this zone is served from."),
+                        "response_min": min_col("Response", width="small"),
                     },
                 )
 
@@ -647,31 +793,60 @@ with tabs[2]:
             st_folium(viz.map_coverage(res, existing_stations, True, **tk), height=MAP_H,
                       width="stretch", returned_objects=[], key="map_cover")
 
-    st.subheader("Threshold sensitivity", divider="gray")
+    st.subheader("Sensitivity analysis", divider="gray")
     with st.container(border=True):
-        st.markdown("**How the plan changes with the response-time limit**")
-        st.caption("Re-solves the covering model at 5, 8 and 10 minutes on the same "
-                   "candidate pool, so the cost of a tighter promise is explicit.")
-        if st.button("Run the 5 / 8 / 10-minute sweep", icon=":material/query_stats:"):
-            with st.spinner("Re-solving at each limit…"):
+        st.markdown("**What the plan costs at other promises and other budgets**")
+        st.caption(
+            f"Two sweeps over the same candidate pool: the covering model re-solved at "
+            f"{', '.join(f'{t:g}' for t in config.RESPONSE_THRESHOLDS_MIN)} minutes, and "
+            f"the maximal-covering model re-solved at every budget from one station "
+            f"upwards at the current {threshold:g}-minute limit."
+        )
+        if st.button("Run both sweeps", icon=":material/query_stats:",
+                     key="btn_sweep"):
+            with st.spinner("Re-solving at each limit and each budget…"):
                 st.session_state["sweep"] = covering.threshold_sweep(
                     candidates, zones, config.RESPONSE_THRESHOLDS_MIN, cand_ahp, tk)
+                # Carried only as far as the budget that first reaches full
+                # coverage, plus a couple of stations to show the curve has
+                # flattened: every further P re-solves an ILP for a flat line.
+                sc = st.session_state.get("cover")
+                knee = sc.n_stations if sc is not None and sc.n_stations else 8
+                st.session_state["curve"] = covering.marginal_coverage_curve(
+                    candidates, zones, threshold,
+                    min(len(candidates), max(4, knee + 3)), tk)
+                st.session_state["curve_knee"] = knee
+
         sweep = st.session_state.get("sweep")
+        curve = st.session_state.get("curve")
         if sweep is not None:
-            c1, c2, c3 = st.columns([2, 2, 3], vertical_alignment="top")
-            c1.plotly_chart(viz.chart_threshold_stations(sweep), width="stretch")
-            c2.plotly_chart(viz.chart_threshold_coverage(sweep), width="stretch")
-            c3.dataframe(
+            c1, c2 = st.columns(2, vertical_alignment="top")
+            with c1:
+                st.plotly_chart(viz.chart_threshold_stations(sweep), width="stretch")
+            with c2:
+                # The coverage-per-limit chart that used to sit here drew three
+                # bars at 100.0%, 100.0%, 100.0% -- a set-covering model reaches
+                # full coverage at every limit by construction, so the chart
+                # could only ever say so three times. Coverage against *budget*
+                # is the question the bars were being asked to answer, and it
+                # has a real shape: the diminishing return that justifies the
+                # maximal-covering framing in the first place.
+                if curve is not None:
+                    st.plotly_chart(
+                        viz.chart_marginal_curve(
+                            curve, st.session_state.get("curve_knee")),
+                        width="stretch")
+            st.dataframe(
                 sweep, hide_index=True, width="stretch",
                 height=tbl_height(len(sweep), 6),
                 column_order=["threshold_min", "stations_required",
                               "demand_covered_pct", "zones_covered"],
                 column_config={
                     "threshold_min": st.column_config.NumberColumn(
-                        "Limit", format="%d min", width="small"),
-                    "stations_required": count_col("Stations", width="small"),
+                        "Response-time limit", format="%d min"),
+                    "stations_required": count_col("Stations needed"),
                     "demand_covered_pct": pct_col("Demand covered"),
-                    "zones_covered": count_col("Zones", width="small"),
+                    "zones_covered": count_col("Zones covered"),
                 },
             )
 
@@ -699,18 +874,39 @@ with tabs[2]:
         rows = st.session_state.get("bench")
         if rows:
             bench = pd.DataFrame(rows)
-            c1, c2 = st.columns([3, 2], vertical_alignment="top")
-            c1.plotly_chart(viz.chart_comparison(rows), width="stretch")
-            c2.dataframe(
+            # Chart over table rather than beside it. Five columns in the
+            # two-fifths column this used to sit in lost "Demand covered" to
+            # an ellipsis and pushed "Zones covered" off the right edge
+            # entirely -- on the one table in the app whose whole job is to
+            # show that both plans cover the same demand.
+            st.plotly_chart(viz.chart_comparison(rows), width="stretch")
+
+            at_limit = bench[bench["threshold_min"] == threshold]
+            if len(at_limit) == 2:
+                ours = at_limit[at_limit["plan"] == "Optimised placement"].iloc[0]
+                theirs = at_limit[at_limit["plan"] != "Optimised placement"].iloc[0]
+                st.success(
+                    f"At the {threshold:g}-minute limit the optimised plan covers "
+                    f"**{ours['demand_covered_pct']:.1f}%** of demand from "
+                    f"**{int(ours['stations'])} stations**, against "
+                    f"**{theirs['demand_covered_pct']:.1f}%** from Seattle's "
+                    f"**{int(theirs['stations'])}** — the same coverage from "
+                    f"{int(theirs['stations']) / max(int(ours['stations']), 1):.1f}× "
+                    "fewer sites, because placement follows demand rather than history.",
+                    icon=":material/insights:",
+                )
+            st.dataframe(
                 bench, hide_index=True, width="stretch",
                 height=tbl_height(len(bench), 6),
+                column_order=["plan", "threshold_min", "stations",
+                              "demand_covered_pct", "zones_covered"],
                 column_config={
-                    "plan": st.column_config.TextColumn("Plan"),
+                    "plan": st.column_config.TextColumn("Plan", width="medium"),
                     "threshold_min": st.column_config.NumberColumn(
-                        "Limit", format="%d min", width="small"),
-                    "stations": count_col("Stations", width="small"),
+                        "Response-time limit", format="%d min"),
+                    "stations": count_col("Stations"),
                     "demand_covered_pct": pct_col("Demand covered"),
-                    "zones_covered": count_col("Zones", width="small"),
+                    "zones_covered": count_col("Zones covered"),
                 },
             )
 
@@ -743,37 +939,56 @@ with tabs[3]:
                     format_func=lambda t: (f"{pd.Timestamp(t):%a %d %b %Y, %H:%M} — "
                                            f"{int(busiest.loc[busiest['hour_start'] == t, 'incidents'].iloc[0])} incidents"),
                 )
-                # The deck's setup is one ready unit per base, so that stays the
-                # default -- but the range has to reach a balanced fleet, or the
-                # model's own "each incident -> exactly one ambulance" is
-                # unreachable for a busy hour and most calls go unserved. The
-                # bound is a fixed 12 rather than one derived from the current
-                # station count: a slider whose max moves is a different widget
-                # each time, and Streamlit would silently reset it whenever the
-                # plan changed.
+                # The fleet opens at the size that can actually field the hour,
+                # not at one unit per base. One unit per base puts 7 ambulances
+                # against a 30-call hour, and the assignment LP then answers a
+                # question nobody asked: with no units left, 23 of the 30 calls
+                # come back "Unserved", the dispatch plan is mostly blank, and
+                # the response histogram has seven bars in it -- the model reads
+                # as broken when it is merely starved. Worse, an LP free to
+                # leave calls unserved minimises by serving the *cheapest* ones,
+                # so the under-resourced run is also the least honest one (see
+                # ``assignment.benchmark_vs_greedy``). Scarcity is still one
+                # drag of the slider away, and the capacity-gap tile below
+                # reports it either way.
+                #
+                # The bound is a fixed 12 rather than one derived from the
+                # current station count: a slider whose max moves is a different
+                # widget each time, and Streamlit would silently reset it
+                # whenever the plan changed.
                 n_calls = int(busiest.loc[busiest["hour_start"] == chosen_hour,
                                           "incidents"].iloc[0])
                 need = -(-n_calls // max(res.n_stations, 1))  # ceil division
-                units = st.slider("Ready units per station", 1, 12, 1,
-                                  key="units_per_station")
-                if need > 1:
+                units = st.slider("Ready units per station", 1, 12,
+                                  min(12, max(1, need)), key="units_per_station")
+                fleet = units * res.n_stations
+                if fleet >= n_calls:
                     st.caption(
-                        f"↳ {need} units per station ({need * res.n_stations} in total) "
-                        "would field every call this hour — below that, the surplus "
-                        "calls wait."
+                        f"↳ {fleet} ambulances for {n_calls} calls — every call can "
+                        "be fielded, so the LP is choosing *which* unit goes where."
+                    )
+                else:
+                    st.caption(
+                        f"↳ {fleet} ambulances for {n_calls} calls — "
+                        f"{n_calls - fleet} will wait. {need} units per station "
+                        f"({need * res.n_stations} in total) would field them all."
                     )
         with c2:
             with st.container(border=True):
                 st.markdown("**Busiest hours in this period**")
+                # The weekday had its own column, which at this width clipped
+                # "Wednesday" to "Wednesda". It is one token inside the
+                # timestamp beside it, so it moves into the format string.
                 st.dataframe(
                     busiest, hide_index=True, width="stretch",
-                    height=tbl_height(len(busiest), 6),
-                    column_order=["rank", "hour_start", "weekday", "incidents"],
+                    height=tbl_height(len(busiest), 5),
+                    # The rank column goes for the same reason as everywhere
+                    # else -- the rows are in rank order -- and here it is what
+                    # the full timestamp needs in order to render whole.
+                    column_order=["hour_start", "incidents"],
                     column_config={
-                        "rank": rank_col(),
                         "hour_start": st.column_config.DatetimeColumn(
-                            "Hour", format="DD MMM YYYY, HH:mm"),
-                        "weekday": st.column_config.TextColumn("Day", width="small"),
+                            "Hour", format="ddd DD MMM YYYY, HH:mm"),
                         "incidents": count_col("Incidents", width="small"),
                     },
                 )
@@ -801,7 +1016,10 @@ with tabs[3]:
             st.subheader("Dispatch result", divider="gray")
             k = kpi_row()
             kpi(k, "Total travel time", f"{a.total_time_min:.1f} min",
-                icon=":material/timer:")
+                icon=":material/timer:",
+                help_text="Summed over the calls this plan served. The benchmark "
+                          "chart below uses a different, like-for-like workload — "
+                          "see the note under it.")
             kpi(k, "Mean response", f"{a.mean_time_min:.1f} min", icon=":material/speed:")
             kpi(k, "Worst response", f"{a.max_time_min:.1f} min",
                 icon=":material/priority_high:")
@@ -817,46 +1035,90 @@ with tabs[3]:
             # field, which is the widest string in the table and repeats on
             # every unserved row; the blank response time beside it already
             # says the same thing.
-            plan = a.assignments.assign(ambulance=np.where(
-                a.assignments["served"], a.assignments["ambulance"], "Unserved"))
+            # An unserved row has no response time, and a NumberColumn renders
+            # that missing value as the literal string "None" -- Python's
+            # repr leaking into a dispatch sheet. Formatted here instead, so
+            # the absence reads as an em dash.
+            plan = a.assignments.assign(
+                ambulance=np.where(a.assignments["served"],
+                                   a.assignments["ambulance"], "Unserved"),
+                response_txt=np.where(
+                    a.assignments["served"],
+                    a.assignments["response_min"].map(
+                        lambda v: f"{v:.1f} min" if pd.notna(v) else "—"),
+                    "—"),
+            )
 
             with st.container(border=True):
                 st.markdown("**Dispatch plan**")
                 st.dataframe(
                     plan, hide_index=True, width="stretch",
                     height=tbl_height(len(plan), 10),
-                    column_order=["incident_number", "time", "type", "zip_code",
-                                  "address", "ambulance", "base_zone", "response_min"],
+                    # Six columns at 150/75px apiece = 600px, inside the 700px
+                    # this card gets at a 13-inch laptop width. Eight columns
+                    # came to 750px and Streamlit answered by dropping the
+                    # rightmost ones from the grid entirely -- silently, and
+                    # starting with the response time, the single number the
+                    # model exists to produce. The two that go are the ZIP
+                    # (the address beside it already locates the call) and the
+                    # call type (the LP minimises travel time regardless of it;
+                    # the call mix is on the Data tab).
+                    column_order=["incident_number", "time", "address",
+                                  "ambulance", "base_zone", "response_txt"],
                     column_config={
                         "incident_number": st.column_config.TextColumn(
-                            "Incident", width="small"),
+                            "Incident", width="medium"),
                         "time": st.column_config.DatetimeColumn(
                             "Time", format="HH:mm", width="small"),
-                        "type": st.column_config.TextColumn("Type"),
-                        "zip_code": st.column_config.TextColumn("ZIP", width="small"),
                         "address": st.column_config.TextColumn("Address", width="medium"),
-                        "ambulance": st.column_config.TextColumn("Unit"),
+                        "ambulance": st.column_config.TextColumn("Unit", width="small"),
                         "base_zone": st.column_config.TextColumn(
-                            "From zone", width="small"),
-                        "response_min": min_col("Response", width="small"),
+                            "From", width="small",
+                            help="Zone of the station the unit was sent from."),
+                        "response_txt": st.column_config.TextColumn(
+                            "Response", width="small", alignment="right"),
                     },
                 )
 
+            # The comparison card carries a chart, a metric and an explanatory
+            # note; the distribution card carries only a chart. Left at the
+            # same figure height the two cards ended 125px apart, so the taller
+            # card's content sets the height of the shorter card's chart.
             c1, c2 = st.columns([3, 2], vertical_alignment="top")
             with c1:
                 with st.container(border=True):
                     st.plotly_chart(
-                        viz.chart_response_distribution(a.assignments, threshold),
+                        viz.chart_response_distribution(a.assignments, threshold,
+                                                        height=430),
                         width="stretch")
             with c2:
                 with st.container(border=True):
                     st.plotly_chart(
                         viz.chart_dispatch_comparison(a.benchmark_lp_min or 0.0,
-                                                      a.greedy_total_min or 0.0),
+                                                      a.greedy_total_min or 0.0,
+                                                      a.benchmark_n_incidents),
                         width="stretch")
                     if a.greedy_total_min:
-                        st.metric("Improvement over nearest-unit-first dispatch",
-                                  f"{a.improvement_pct:.1f}%", border=False)
+                        st.metric("Saved vs nearest-unit-first",
+                                  f"{a.improvement_pct:.1f}%", border=False,
+                                  width="stretch",
+                                  help="Share of total fleet travel time the "
+                                       "optimal matching removes, on the same "
+                                       "calls as the greedy baseline.")
+            # Without this the tab can show two different totals for the same
+            # hour under the same words -- the tile above reports the plan's own
+            # served calls, the chart the first k calls in arrival order -- and
+            # a reader is left to assume one of them is wrong. Full width,
+            # below both cards, so it does not unbalance the row it explains.
+            st.caption(
+                f"Both bars above are scored on the same workload: the first "
+                f"**{a.benchmark_n_incidents}** calls of the hour in arrival order, "
+                "which is what a dispatcher actually has to clear. Restricting both "
+                "sides this way measures the quality of the matching rather than "
+                "which calls each method chose to answer — so when the fleet is too "
+                "small to field the whole hour, this total is a different quantity "
+                "from the *Total travel time* tile above."
+            )
 
             with st.expander("Cost matrix (travel time in minutes)",
                               icon=":material/calculate:"):

@@ -42,9 +42,14 @@ bench = []
 for t in [5, 8, 10]:
     ours = covering.solve_set_covering(candidates, zones, t, None, TK)
     theirs = covering.evaluate_fixed_stations(existing, zones, t, TK)
+    # chart_comparison plots the station count and labels it with the coverage,
+    # so both keys have to be here -- see its docstring for why coverage alone
+    # drew six bars of equal height.
     bench.append({"plan": "Optimised placement", "threshold_min": t,
+                  "stations": ours.n_stations,
                   "demand_covered_pct": ours.demand_pct})
     bench.append({"plan": "Seattle's real stations", "threshold_min": t,
+                  "stations": len(existing),
                   "demand_covered_pct": theirs.demand_pct})
 
 peak_ts, _ = data_loader.peak_hour_window(sel)

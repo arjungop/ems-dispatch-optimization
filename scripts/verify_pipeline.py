@@ -54,7 +54,21 @@ existing = data_loader.load_existing_stations()
 print(f"   loaded {len(incidents):,} incidents, {len(existing)} real SFD stations")
 print(f"   range  {incidents['datetime'].min()} -> {incidents['datetime'].max()}")
 
-check("dataset is the full ~2.2M feed", len(incidents) > 2_100_000, f"{len(incidents):,} rows")
+# Which dataset this checkout has decides what "complete" means. A full local
+# checkout carries the whole 2.2M-row feed; a deployed one carries only the
+# committed slice (see src/config.py). Asserting 2.1M either way turns a
+# correct deployment into a red run, and dropping the assertion altogether
+# would stop catching a locally truncated Parquet -- so the bound follows the
+# file that was actually loaded.
+ON_FULL_DATASET = config.CALLS_PARQUET == config.CALLS_PARQUET_FULL
+if ON_FULL_DATASET:
+    check("dataset is the full ~2.2M feed", len(incidents) > 2_100_000,
+          f"{len(incidents):,} rows")
+else:
+    span_years = (incidents["datetime"].max() - incidents["datetime"].min()).days / 365.25
+    check(f"deploy slice holds its {config.DEPLOY_YEARS} years",
+          len(incidents) > 100_000 and span_years >= config.DEPLOY_YEARS - 0.1,
+          f"{len(incidents):,} rows over {span_years:.1f} years")
 check("incident numbers unique", incidents["incident_number"].is_unique)
 check("no missing coordinates", incidents[["latitude", "longitude"]].notna().all().all())
 check("all incidents have a ZIP zone", incidents["zip_code"].notna().all())

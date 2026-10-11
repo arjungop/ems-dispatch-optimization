@@ -127,6 +127,37 @@ def _headroom(values, pad: float = 1.14) -> list[float]:
     return [0, (top if top > 0 else 1.0) * pad]
 
 
+# Every count axis in the app abbreviates the same way. Left to Plotly the
+# convention is picked per figure from that figure's own magnitude, so the two
+# charts that sit side by side under "When load spikes" labelled the same
+# quantity two different ways -- 5000/4000/3000 on the hour chart, 12k/10k/8k
+# on the weekday chart beside it. Stating the format makes the pair comparable.
+COUNT_TICKS = dict(tickformat="~s")
+
+
+def _alpha(hex_colour: str, a: float) -> str:
+    """A token colour at partial opacity, so a fill stays inside the palette.
+
+    Plotly fills take rgba and the tokens are hex, and hardcoding the rgba
+    triple is how a chart ends up painted in light-mode blue on the dark
+    ground -- the one thing the colour policy at the top of this file exists
+    to prevent.
+    """
+    h = hex_colour.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r},{g},{b},{a})"
+
+
+def chart_height(fig: go.Figure) -> int:
+    """The height a figure was styled to, for sizing a table to match it.
+
+    Paired chart/table rows only read as one row if both cards end on the same
+    line, and a table's height is a function of its row count, not of the chart
+    beside it. ``app.tbl_rows_for`` turns this back into a row cap.
+    """
+    return int(fig.layout.height or 340)
+
+
 def _lock_category_order(fig: go.Figure, order, axis: str = "y") -> go.Figure:
     """Pin a categorical axis to the order the data was sorted into.
 
@@ -156,10 +187,10 @@ def chart_busiest_zones(df: pd.DataFrame, top_n: int = 15) -> go.Figure:
     fig.update_traces(marker_cornerradius=4, cliponaxis=False)
     fig.update_layout(title=f"Top {top_n} ZIP zones by EMS incident count")
     fig.update_xaxes(showgrid=True, gridcolor=ink["grid"], title="incidents",
-                     range=_headroom(d["incidents"]))
+                     range=_headroom(d["incidents"]), **COUNT_TICKS)
     fig.update_yaxes(showgrid=False, title=None)
     _lock_category_order(fig, d["zip_code"])
-    return _style(fig, ink, height=max(340, 26 * len(d) + 110))
+    return _style(fig, ink, height=max(340, 28 * len(d) + 122))
 
 
 def chart_calls_by_hour(df: pd.DataFrame) -> go.Figure:
@@ -176,19 +207,30 @@ def chart_calls_by_hour(df: pd.DataFrame) -> go.Figure:
     fig.update_layout(title="EMS calls by hour of day")
     fig.update_xaxes(title="hour of day", dtick=2)
     # Headroom for the "peak" label, which otherwise clips on the tallest bar.
-    fig.update_yaxes(title="incidents", range=_headroom(df["incidents"], 1.20))
+    fig.update_yaxes(title="incidents", range=_headroom(df["incidents"], 1.20),
+                     **COUNT_TICKS)
     return _style(fig, ink)
 
 
 def chart_calls_by_weekday(df: pd.DataFrame) -> go.Figure:
+    """Weekday load. The spread across the week is a few percent, so the bars
+    are near enough the same height to be unreadable against the axis alone --
+    the busiest and quietest days are called out in text instead.
+    """
     s, _, ink = tokens()
+    hi = int(df["incidents"].idxmax())
+    lo = int(df["incidents"].idxmin())
+    labels = [f"{df['incidents'].iloc[i]:,}" if i in (hi, lo) else ""
+              for i in range(len(df))]
     fig = go.Figure(go.Bar(
         x=df["weekday"], y=df["incidents"], marker=dict(color=s[1], line=dict(width=0)),
+        text=labels, textposition="outside", textfont=dict(color=ink["secondary"]),
         hovertemplate="%{x}<br>%{y:,} incidents<extra></extra>",
     ))
     fig.update_traces(marker_cornerradius=4, cliponaxis=False)
     fig.update_layout(title="EMS calls by day of week")
-    fig.update_yaxes(title="incidents")
+    fig.update_yaxes(title="incidents", range=_headroom(df["incidents"], 1.20),
+                     **COUNT_TICKS)
     return _style(fig, ink)
 
 
@@ -261,7 +303,7 @@ def chart_call_types(df: pd.DataFrame) -> go.Figure:
     fig.update_traces(marker_cornerradius=4, cliponaxis=False)
     fig.update_layout(title="Which EMS call types make up demand")
     fig.update_xaxes(showgrid=True, gridcolor=ink["grid"], title="incidents",
-                     range=_headroom(d["incidents"]))
+                     range=_headroom(d["incidents"]), **COUNT_TICKS)
     fig.update_yaxes(showgrid=False, title=None)
     _lock_category_order(fig, d["type"])
     return _style(fig, ink, height=max(340, 28 * len(d) + 110))
@@ -301,12 +343,12 @@ def chart_ahp_ranking(df: pd.DataFrame, top_n: int = 15) -> go.Figure:
         hovertemplate="ZIP %{y}<br>priority %{x:.3f}<extra></extra>",
     ))
     fig.update_traces(marker_cornerradius=4, cliponaxis=False)
-    fig.update_layout(title=f"Top {top_n} candidate sites by AHP priority score")
+    fig.update_layout(title=f"Top {top_n} sites by priority score")
     fig.update_xaxes(showgrid=True, gridcolor=ink["grid"], title="priority score",
                      range=_headroom(d["ahp_score"], 1.18))
     fig.update_yaxes(showgrid=False, title=None)
     _lock_category_order(fig, d["zip_code"])
-    return _style(fig, ink, height=max(340, 26 * len(d) + 110))
+    return _style(fig, ink, height=max(340, 28 * len(d) + 122))
 
 
 # ---------------------------------------------------------------------------
@@ -352,22 +394,57 @@ def chart_threshold_coverage(df: pd.DataFrame) -> go.Figure:
     return _style(fig, ink, height=300)
 
 
-def chart_marginal_curve(df: pd.DataFrame) -> go.Figure:
+def chart_marginal_curve(df: pd.DataFrame, mark_at: int | None = None) -> go.Figure:
+    """Coverage as a function of the station budget P.
+
+    The curve is the argument for the maximal-covering framing: the first
+    handful of stations buy most of the city. ``mark_at`` is the budget the
+    plan on screen actually chose, called out on the curve so the reader can
+    see where that plan sits on the trade-off rather than reading it off the
+    gridlines.
+    """
     s, _, ink = tokens()
     fig = go.Figure(go.Scatter(
         x=df["stations"], y=df["demand_covered_pct"], mode="lines+markers",
-        line=dict(color=s[1], width=2), marker=dict(size=8, color=s[1]),
+        line=dict(color=s[1], width=2), marker=dict(size=7, color=s[1]),
+        fill="tozeroy", fillcolor=_alpha(s[1], 0.10),
         hovertemplate="%{x} stations<br>%{y:.1f}% of demand covered<extra></extra>",
     ))
-    fig.update_layout(title="Diminishing returns — coverage vs station budget",
+    if mark_at:
+        row = df[df["stations"] == mark_at]
+        if not row.empty:
+            y = float(row["demand_covered_pct"].iloc[0])
+            fig.add_trace(go.Scatter(
+                x=[mark_at], y=[y], mode="markers",
+                marker=dict(size=12, color=s[1], line=dict(width=2,
+                                                           color=ink["surface"])),
+                hovertemplate=f"{mark_at} stations — the plan on screen"
+                              "<extra></extra>",
+            ))
+            fig.add_annotation(
+                x=mark_at, y=y, text=f"this plan: <b>{mark_at}</b> → {y:.1f}%",
+                showarrow=True, arrowhead=0, arrowcolor=ink["muted"],
+                ax=24, ay=38, xanchor="left",
+                font=dict(color=ink["secondary"], size=11),
+            )
+    fig.update_layout(title="Coverage vs station budget",
                       hovermode="x unified")
-    fig.update_xaxes(title="number of stations (P)", dtick=1)
-    fig.update_yaxes(title="% of demand covered", range=[0, 105])
+    fig.update_xaxes(title="number of stations (P)",
+                     dtick=max(1, -(-int(df["stations"].max()) // 10)))
+    fig.update_yaxes(title="% of demand covered", range=[0, 108], ticksuffix="%")
     return _style(fig, ink, height=320)
 
 
 def chart_comparison(rows: list[dict]) -> go.Figure:
     """Our placement vs Seattle's real stations, at the same response limits.
+
+    Plotted on *station count*, not on demand covered. Both plans cover
+    essentially all of the demand at every limit -- 100% against 99.7%, 100%
+    and 100% -- so a coverage chart draws six bars of the same height and the
+    finding reads as "no difference". The difference is the cost of buying that
+    coverage: 7 stations against 36 at the 8-minute limit. Coverage is still
+    carried, as the label on each bar and in the table beside the chart, so the
+    parity that makes the station counts comparable stays on screen.
 
     Two series -> legend is always present; colour means the same thing it
     means everywhere else in the app.
@@ -379,15 +456,18 @@ def chart_comparison(rows: list[dict]) -> go.Figure:
         d = df[df["plan"] == name]
         fig.add_trace(go.Bar(
             name=name, x=[f"{t} min" for t in d["threshold_min"]],
-            y=d["demand_covered_pct"], marker=dict(color=s[slot], line=dict(width=0)),
-            text=[f"{v:.1f}%" for v in d["demand_covered_pct"]],
+            y=d["stations"], marker=dict(color=s[slot], line=dict(width=0)),
+            text=[f"{int(n)}<br><span style='font-size:10px'>{p:.1f}% covered</span>"
+                  for n, p in zip(d["stations"], d["demand_covered_pct"])],
             textposition="outside", textfont=dict(color=ink["secondary"]),
-            hovertemplate=f"{name}<br>%{{x}} limit<br>%{{y:.1f}}% covered<extra></extra>",
+            customdata=d["demand_covered_pct"],
+            hovertemplate=f"{name}<br>%{{x}} limit<br>%{{y}} stations"
+                          "<br>%{customdata:.1f}% of demand covered<extra></extra>",
         ))
     fig.update_traces(marker_cornerradius=4, cliponaxis=False)
-    fig.update_layout(title="How our placement compares to Seattle's real stations",
+    fig.update_layout(title="Stations needed to cover the same demand",
                       barmode="group", bargap=0.3, bargroupgap=0.06)
-    fig.update_yaxes(title="% of demand covered", range=[0, 112])
+    fig.update_yaxes(title="stations", range=_headroom(df["stations"], 1.28))
     return _style(fig, ink, height=340, showlegend=True)
 
 
@@ -395,7 +475,8 @@ def chart_comparison(rows: list[dict]) -> go.Figure:
 # Step 4 -- assignment
 # ---------------------------------------------------------------------------
 
-def chart_response_distribution(df: pd.DataFrame, threshold: float) -> go.Figure:
+def chart_response_distribution(df: pd.DataFrame, threshold: float,
+                                height: int = 300) -> go.Figure:
     """How many calls land in each minute of response time.
 
     The counts are binned here rather than by ``go.Histogram`` so the bins are
@@ -412,7 +493,7 @@ def chart_response_distribution(df: pd.DataFrame, threshold: float) -> go.Figure
         fig.add_annotation(text="No served incidents to plot", showarrow=False,
                            font=dict(color=ink["muted"]), x=0.5, y=0.5,
                            xref="paper", yref="paper")
-        return _style(fig, ink, height=300)
+        return _style(fig, ink, height=height)
 
     top = max(float(d["response_min"].max()), float(threshold))
     edges = np.arange(0.0, np.ceil(top) + 1.0, 1.0)
@@ -438,14 +519,25 @@ def chart_response_distribution(df: pd.DataFrame, threshold: float) -> go.Figure
     # Whole incidents only, and headroom so the limit annotation clears the bars.
     fig.update_yaxes(title="incidents", dtick=max(1, -(-cmax // 6)),
                      range=_headroom(counts, 1.25))
-    return _style(fig, ink, height=300)
+    return _style(fig, ink, height=height)
 
 
-def chart_dispatch_comparison(optimised: float, greedy: float) -> go.Figure:
-    """Total fleet travel time: the LP optimum vs nearest-unit-first dispatch."""
+def chart_dispatch_comparison(optimised: float, greedy: float,
+                              n_calls: int = 0) -> go.Figure:
+    """LP optimum vs nearest-unit-first dispatch, over the same calls.
+
+    The title has to name the workload. ``benchmark_vs_greedy`` deliberately
+    scores both methods on the first ``k`` calls in arrival order rather than
+    on the dispatch plan's own served set (see its docstring: comparing those
+    would measure triage, not routing). That makes this total a different
+    quantity from the "Total travel time" tile above it, which covers whatever
+    calls the unrestricted plan actually served -- two numbers, both correct,
+    that read as a contradiction if the chart just says "total travel time".
+    """
     s, _, ink = tokens()
+    scope = f" — same {n_calls} calls" if n_calls else ""
     fig = go.Figure(go.Bar(
-        x=["Optimised dispatch", "Nearest-unit dispatch"],
+        x=["Optimised", "Nearest-unit"],
         y=[optimised, greedy],
         marker=dict(color=[s[1], s[2]], line=dict(width=0)),
         text=[f"{optimised:.1f} min", f"{greedy:.1f} min"], textposition="outside",
@@ -453,7 +545,7 @@ def chart_dispatch_comparison(optimised: float, greedy: float) -> go.Figure:
         hovertemplate="%{x}<br>%{y:.1f} total minutes<extra></extra>",
     ))
     fig.update_traces(marker_cornerradius=4, cliponaxis=False)
-    fig.update_layout(title="Total fleet travel time for the hour")
+    fig.update_layout(title=f"Fleet travel time{scope}")
     fig.update_yaxes(title="total minutes", range=_headroom([optimised, greedy], 1.2))
     return _style(fig, ink, height=300)
 
@@ -525,6 +617,36 @@ def _base_map(center=(47.6062, -122.3321), zoom: int = 11) -> folium.Map:
       font-size: 11px; color: {ink["secondary"]}; margin-top: 4px; }}
 </style>"""))
     return m
+
+
+def _fit(m: folium.Map, lats, lons, pad: float = 0.08) -> None:
+    """Frame the map on what it actually plots, rather than trusting a fixed
+    zoom_start against a hardcoded Seattle center.
+
+    streamlit-folium mounts a map's iframe even while its tab panel is
+    ``display:none`` (Streamlit keeps every tab's content in the DOM and only
+    toggles visibility), so Leaflet can compute its initial view against a
+    zero-size container. The symptom is silent and data-dependent -- the
+    dispatch map was observed rendering two zoom levels out from its coded
+    ``zoom_start=12`` when the Dispatch tab is opened after another tab has
+    already been viewed, which is the normal way through the app. Fitting to
+    explicit bounds from the real coordinates sidesteps the stale-container
+    math entirely: whatever size Leaflet thinks it has, the markers end up
+    framed.
+    """
+    lats, lons = list(lats), list(lons)
+    if not lats:
+        return
+    lat_min, lat_max = min(lats), max(lats)
+    lon_min, lon_max = min(lons), max(lons)
+    if lat_min == lat_max and lon_min == lon_max:
+        # A single point has no extent to fit; hold the default city zoom
+        # centred on it instead of asking Leaflet to zoom in on nothing.
+        m.location = [lat_min, lon_min]
+        return
+    # A small fixed pad (in degrees) rather than Leaflet's own padding option,
+    # so a one-station result still frames with visible context around it.
+    m.fit_bounds([[lat_min - pad, lon_min - pad], [lat_max + pad, lon_max + pad]])
 
 
 def _dot_icon(color: str, size: int = 18) -> folium.DivIcon:
@@ -601,6 +723,7 @@ def map_demand(zones: pd.DataFrame, zip_geojson: dict | None = None) -> folium.M
 
     _ramp_legend(m, ramp, vmin, vmax, "EMS incidents per zone")
     folium.LayerControl(collapsed=True, position="topleft").add_to(m)
+    _fit(m, zones["latitude"], zones["longitude"])
     return m
 
 
@@ -659,6 +782,10 @@ def map_coverage(result, existing: pd.DataFrame | None = None,
         fg_e.add_to(m)
 
     folium.LayerControl(collapsed=True, position="topleft").add_to(m)
+    # Framed on the zone table rather than the opened stations alone, so an
+    # early-budget Mode-B result (few stations, same zones) still shows the
+    # uncovered zones it left out instead of cropping to just what it chose.
+    _fit(m, zt["latitude"], zt["longitude"])
     return m
 
 
@@ -697,4 +824,6 @@ def map_dispatch(result, ambulances: pd.DataFrame) -> folium.Map:
     fg_i.add_to(m)
 
     folium.LayerControl(collapsed=True, position="topleft").add_to(m)
+    _fit(m, pd.concat([ambulances["latitude"], result.assignments["latitude"]]),
+         pd.concat([ambulances["longitude"], result.assignments["longitude"]]))
     return m

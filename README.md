@@ -38,8 +38,10 @@ Headline results over the last 12 months (79,152 EMS incidents, 28 demand zones)
 
 ## Quick start
 
-> **The datasets are not in this repository.** The raw 911 feed is ~191 MB, over GitHub's
-> file-size limit, so `data/` is generated locally by the first two commands below.
+> **The full datasets are not in this repository.** The raw 911 feed is ~191 MB, over
+> GitHub's file-size limit, so the complete `data/` is generated locally by the first two
+> commands below. A ~12 MB five-year slice *is* committed, in `data/deploy/`, so a fresh
+> clone runs without downloading anything — see [Deployment](#deployment).
 
 Needs **Python 3.10 or newer** (Streamlit's own floor); developed and tested on 3.13.
 
@@ -238,10 +240,60 @@ src/
   covering.py              Step 3 — set covering & maximal covering ILP
   assignment.py            Step 4 — dispatch assignment LP
   viz.py                   Plotly charts & Folium maps
+  make_deploy_data.py      Build the committed slice the hosted app runs on
 data/
-  raw/                     Downloaded source data
-  processed/               Parquet cache
+  raw/                     Downloaded source data        (gitignored)
+  processed/               Full Parquet cache, 2.2M rows (gitignored)
+  deploy/                  Five-year slice, ~12 MB       (committed)
 ```
+
+## Deployment
+
+The app is a persistent WebSocket server with in-process session state, so it needs a
+host that runs a real container. **Streamlit Community Cloud** is the one it targets;
+Render, Railway, Fly.io and Hugging Face Spaces work the same way. **Vercel and Netlify
+cannot host it** — their serverless functions are stateless, time-bounded and carry no
+WebSocket support, which is the whole transport Streamlit runs on.
+
+### The data problem, and how it is solved
+
+Community Cloud gives an app [about 690 MB of memory at the low end](https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app#app-resources-and-limits).
+Loading the full 2.2M-row feed peaks at **615 MB resident** before Streamlit, Plotly and
+Folium are counted — over the floor, and there is no download step on a fresh container
+anyway. So `data/deploy/` holds a committed slice of the same cleaned table:
+
+| | rows | on disk | peak RSS |
+|---|---:|---:|---:|
+| full (local, gitignored) | 2,197,739 | 61 MB | 615 MB |
+| `data/deploy/` (committed) | 605,071 | 11 MB | **284 MB** |
+
+`src/config.py` resolves each data path to the full file where it exists and the slice
+otherwise, so a local checkout keeps the entire history back to 2003 and a deployment
+still runs. Rebuild the slice after refreshing the data:
+
+```bash
+python scripts/make_deploy_data.py     # writes data/deploy/, then commit it
+```
+
+**The one behavioural difference:** on a deployment the sidebar's *Entire dataset* preset
+means the last five years rather than all 23. Every other preset — and every model, map
+and benchmark — is identical, because the app filters to a period before it computes
+anything. Both check suites pass against either dataset.
+
+### Deploying to Streamlit Community Cloud
+
+1. Push to GitHub, `data/deploy/` included.
+2. Sign in at [share.streamlit.io](https://share.streamlit.io) with the GitHub account
+   that owns the repo and authorise it.
+3. **Create app → Deploy a public app from a repo**, then set:
+   - Repository: this repo, Branch: `master`, Main file path: `app.py`
+   - **Advanced settings → Python version: 3.13** (the default is 3.12; `requirements.txt`
+     is pinned to the versions verified on 3.13)
+4. Deploy. The first build installs the pinned dependencies and takes a few minutes;
+   later pushes to `master` redeploy automatically.
+
+No secrets are needed — every model solves locally in-process and the app makes no
+outbound calls except for basemap tiles.
 
 ## Verification
 

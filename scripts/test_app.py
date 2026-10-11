@@ -74,8 +74,10 @@ headings = [s.value for s in at.subheader]
 # Each heading is the narrative line for its section; the chart inside states
 # the measure ("Top 15 ZIP zones by EMS incident count"), so the two no longer
 # repeat each other and the headings are checked on their own wording.
+# "Sensitivity analysis" rather than the older "Threshold sensitivity": the
+# section now sweeps the station budget as well as the response-time limit.
 SECTIONS = ("Where demand concentrates", "When load spikes", "Demand weights",
-            "Judgement consistency", "Candidate sites", "Threshold sensitivity",
+            "Judgement consistency", "Candidate sites", "Sensitivity analysis",
             "Benchmark vs. real stations")
 check("every section heading rendered",
       all(any(s in h for h in headings) for s in SECTIONS),

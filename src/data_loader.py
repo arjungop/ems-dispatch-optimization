@@ -56,7 +56,10 @@ def build_processed(
 ) -> pd.DataFrame:
     """Full clean -> ZIP-tag -> Parquet pipeline. Run once after downloading."""
     calls_csv = calls_csv or config.CALLS_CSV
-    out_path = out_path or config.CALLS_PARQUET
+    # The canonical full-dataset path, never the resolved read path: on a
+    # checkout that only has the committed deploy slice, `config.CALLS_PARQUET`
+    # points *at* that slice, and regenerating would overwrite it.
+    out_path = out_path or config.CALLS_PARQUET_FULL
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     def log(msg: str) -> None:
