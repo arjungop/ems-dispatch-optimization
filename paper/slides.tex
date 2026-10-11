@@ -208,6 +208,44 @@
 \end{frame}
 
 % =========================================================================
+\begin{frame}{What changed since Review 1}
+  \vspace{0.5em}
+  {\color{inks}At the first review we presented on the 911 call feed alone,
+  and said we would bring further data in. We did: both of the supporting
+  datasets below were added afterwards, and each one unlocks a part of the
+  project that could not exist without it.}\\[1.0em]
+
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.47\textwidth}
+      {\color{s1}\textbf{Seattle Fire Stations}}\\
+      {\footnotesize\color{inkm}36 facilities, City GIS}\\[0.5em]
+      {\footnotesize\color{inks}
+      $\bullet$\ Supplies the \textbf{Equity Gap} criterion: the distance from
+      each candidate zone to the nearest station Seattle already runs. Without
+      it the AHP has two criteria, not three.\\[0.4em]
+      $\bullet$\ It \emph{is} the benchmark. Every claim about needing fewer
+      sites than the real network is measured against this file.}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      {\color{s1}\textbf{ZIP Code Tabulation Areas}}\\
+      {\footnotesize\color{inkm}56 polygons, US Census TIGER}\\[0.5em]
+      {\footnotesize\color{inks}
+      $\bullet$\ Turns 79,152 scattered points into \textbf{28 demand zones}
+      by point-in-polygon join.\\[0.4em]
+      $\bullet$\ A covering ILP needs discrete demand points and candidate
+      sites. Without the zones there is no tractable model to solve, only a
+      cloud of coordinates.}
+    \end{column}
+  \end{columns}
+  \vspace{0.6em}
+  \hairline[0.4em]
+  \centering
+  {\footnotesize\color{inks}Both are public, open-licence and fetched by
+  \texttt{scripts/download\_data.py}, so the three-source pipeline reproduces
+  from a clean checkout.}
+\end{frame}
+
+% =========================================================================
 \begin{frame}{Step 1. Demand is concentrated, not uniform}{Which is why placement can beat history}
   \vspace{0.2em}
   \begin{columns}[c,onlytextwidth]
@@ -527,6 +565,26 @@
 \end{frame}
 
 % =========================================================================
+\begin{frame}{The UI implementation}{Both optimisations, solved and read in the browser}
+  \vspace{0.3em}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.49\textwidth}
+      \includegraphics[width=\textwidth]{ui3_placement.png}
+      \centering{\scriptsize\color{inkm}Station placement: set up, solve, result}
+    \end{column}
+    \begin{column}{0.49\textwidth}
+      \includegraphics[width=\textwidth]{ui4_dispatch.png}
+      \centering{\scriptsize\color{inkm}Dispatch: the LP on a chosen peak hour}
+    \end{column}
+  \end{columns}
+  \vspace{0.5em}
+  {\footnotesize\color{inks}Built with Streamlit. The covering ILP above
+  solves in \textbf{22\,ms} and its seven stations become the ambulance bases
+  the dispatch LP works from, so the two models are linked in the interface
+  exactly as they are in the formulation.}
+\end{frame}
+
+% =========================================================================
 \begin{frame}{The application}
   \vspace{0.6em}
   \begin{columns}[T,onlytextwidth]
@@ -577,6 +635,30 @@
   with real road-network distances, and extend the covering model to
   \textbf{MEXCLP} (Daskin, 1983) so that unit busy-fraction is priced in
   rather than assumed away.}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{The report}{Written to the IEEE conference format}
+  \vspace{0.3em}
+  \begin{columns}[c,onlytextwidth]
+    \begin{column}{0.42\textwidth}
+      \centering\includegraphics[height=0.72\textheight]{ui5_paper.png}
+    \end{column}
+    \begin{column}{0.54\textwidth}
+      {\color{inks}Ten pages in \texttt{IEEEtran}, two-column conference
+      style, carrying the full treatment:}\\[0.8em]
+      {\footnotesize\color{inks}
+      $\bullet$\ Related work across covering location, dispatch and AHP\\[0.35em]
+      $\bullet$\ Every model stated formally, with the travel-time
+      derivation\\[0.35em]
+      $\bullet$\ Results, the robustness grid and the study-window
+      sensitivity\\[0.35em]
+      $\bullet$\ A limitations section that quantifies what the model does
+      not capture\\[0.35em]
+      $\bullet$\ Eight vector figures, drawn from the same models and the
+      same colour tokens as this deck and the application}
+    \end{column}
+  \end{columns}
 \end{frame}
 
 % =========================================================================
