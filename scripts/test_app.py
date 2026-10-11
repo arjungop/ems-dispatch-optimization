@@ -78,7 +78,7 @@ headings = [s.value for s in at.subheader]
 # section now sweeps the station budget as well as the response-time limit.
 SECTIONS = ("Where demand concentrates", "When load spikes", "Demand weights",
             "Judgement consistency", "Candidate sites", "Sensitivity analysis",
-            "Benchmark vs. real stations")
+            "Robustness of the station count", "Benchmark vs. real stations")
 check("every section heading rendered",
       all(any(s in h for h in headings) for s in SECTIONS),
       f"{len(headings)} headings")

@@ -807,6 +807,9 @@ with tabs[2]:
             with st.spinner("Re-solving at each limit and each budget…"):
                 st.session_state["sweep"] = covering.threshold_sweep(
                     candidates, zones, config.RESPONSE_THRESHOLDS_MIN, cand_ahp, tk)
+                st.session_state["grid"] = covering.assumption_grid(
+                    candidates, zones, threshold, cand_ahp,
+                    turnout_min=st.session_state["turnout"])
                 # Carried only as far as the budget that first reaches full
                 # coverage, plus a couple of stations to show the curve has
                 # flattened: every further P re-solves an ILP for a flat line.
@@ -849,6 +852,64 @@ with tabs[2]:
                     "zones_covered": count_col("Zones covered"),
                 },
             )
+
+    # ----------------------------------------------------------------------
+    # How much of the answer is the data, and how much is the assumption
+    # ----------------------------------------------------------------------
+    # The response times here are computed, not measured -- the 911 feed
+    # carries none -- so the station count is a function of two sliders as
+    # much as of the city. Reporting it as a single number invites the only
+    # question that can really wound this project ("isn't this just a
+    # simulation?"); reporting the range answers it first.
+    st.subheader("Robustness of the station count", divider="gray")
+    with st.container(border=True):
+        st.markdown("**The same city, 16 readings of the travel model**")
+        st.caption(
+            "Response times in this project are not observed — the Seattle feed records "
+            "no response times — they are computed as *straight-line km × circuity ÷ "
+            "speed + turnout*. The covering model is re-solved below at every "
+            "combination of those two constants, so how much of the headline is the "
+            "data and how much is the assumption is visible rather than implied."
+        )
+        grid = st.session_state.get("grid")
+        if grid is None:
+            st.info("Run the sweeps above to fill this in — the grid is solved alongside them.",
+                    icon=":material/arrow_upward:")
+        else:
+            lo, hi = int(grid["stations_required"].min()), int(grid["stations_required"].max())
+            worst_cover = float(grid["demand_covered_pct"].min())
+            g1, g2 = st.columns([3, 2], vertical_alignment="top")
+            with g1:
+                st.plotly_chart(viz.chart_assumption_grid(grid), width="stretch")
+            with g2:
+                k = kpi_row()
+                kpi(k, "Stations needed", f"{lo}–{hi}", icon=":material/location_on:",
+                    help_text="Across all 16 travel assumptions, at the current limit.")
+                kpi(k, "Worst coverage", f"{worst_cover:.1f}%",
+                    icon=":material/shield:",
+                    help_text="Lowest demand covered in any cell of the grid.")
+                kpi(k, "Still under Seattle's", f"{len(existing_stations) - hi} fewer",
+                    icon=":material/trending_down:",
+                    help_text="Even the most pessimistic cell against the real "
+                              f"{len(existing_stations)}-station network.")
+            if hi < len(existing_stations):
+                st.success(
+                    f"**The count is assumption-dependent; the conclusion is not.** "
+                    f"Full coverage needs **{lo} stations** under the optimistic reading "
+                    f"and **{hi}** under the pessimistic one — a {hi / max(lo, 1):.1f}× "
+                    f"spread, so *{lo}* should never be quoted on its own. In all "
+                    f"{len(grid)} cells the optimised plan still reaches "
+                    f"{worst_cover:.0f}% of demand from fewer than Seattle's "
+                    f"{len(existing_stations)} stations.",
+                    icon=":material/verified:",
+                )
+            else:
+                st.warning(
+                    f"Under the most pessimistic travel assumptions this plan needs "
+                    f"**{hi}** stations, at or above Seattle's {len(existing_stations)}. "
+                    "The placement advantage does not survive that reading.",
+                    icon=":material/warning:",
+                )
 
     st.subheader("Benchmark vs. real stations", divider="gray")
     with st.container(border=True):
@@ -894,6 +955,21 @@ with tabs[2]:
                     f"{int(theirs['stations']) / max(int(ours['stations']), 1):.1f}× "
                     "fewer sites, because placement follows demand rather than history.",
                     icon=":material/insights:",
+                )
+                # Stated here rather than left for a reviewer to raise. The
+                # comparison is real but it is not like-for-like, and the
+                # ratio above is the most quotable number in the app.
+                st.caption(
+                    f":material/warning: **Read this ratio with two caveats.** Seattle's "
+                    f"{int(theirs['stations'])} are *fire* stations — they also carry "
+                    "suppression, hazmat and technical rescue, missions this model does "
+                    "not place for, so a purpose-built EMS network should need fewer "
+                    "sites and the gap overstates any inefficiency on their part. And "
+                    f"{int(ours['stations'])} is the count under the current travel "
+                    "assumptions; see *Robustness of the station count* above for how "
+                    "far it moves. The defensible claim is directional — demand-driven "
+                    "placement needs fewer sites than historical placement — not the "
+                    "specific multiple."
                 )
             st.dataframe(
                 bench, hide_index=True, width="stretch",

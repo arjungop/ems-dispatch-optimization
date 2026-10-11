@@ -27,12 +27,29 @@ ambulance bases used by the assignment model.**
 
 Headline results over the last 12 months (79,152 EMS incidents, 28 demand zones):
 
-- **7 stations** give 100% coverage at an 8-minute limit — against Seattle's 36 real stations,
-  because placement follows demand rather than history.
-- The assignment LP cuts total fleet travel time **8.2%** versus nearest-unit-first greedy
-  dispatch on the busiest hour in the period, measured over the same calls on both sides.
+- **7–17 stations** give 100% coverage at an 8-minute limit, against Seattle's 36 — the
+  range, not a point estimate, because response times here are *computed* rather than
+  measured and the count depends on the two travel constants. Seven is the optimistic
+  reading (45 km/h, circuity 1.3) and seventeen the pessimistic one (30 km/h, circuity
+  1.6); coverage stays at 100% in all sixteen combinations. **The count is
+  assumption-dependent; being under 36 is not.**
+- The assignment LP cuts total fleet travel time **8.8%** versus nearest-unit-first greedy
+  dispatch — 252.1 min against 276.4 min over the same 30 calls, on the busiest hour in
+  the period (Wed 19 Nov 2025, 09:00) with the app's default fleet of 5 units per station.
+  The figure moves with fleet size, so it is only meaningful quoted with its configuration.
 - Every model is verified on the real data, including a cross-check of the LP against an
   independent Hungarian-algorithm solution.
+
+> **What is real and what is modelled.** The incident locations, times and counts are
+> measured — 2.2M actual records. The 36 station locations are real. **Response times are
+> not in the dataset and are not measured:** they are `haversine_km × circuity ÷ speed +
+> turnout`. So this is an optimisation over real demand geography with a modelled travel
+> layer, and its claims are comparative (which sites, in what order, how the answer moves)
+> rather than predictive. Two further caveats, stated here rather than left to be found:
+> Seattle's 36 are *fire* stations carrying suppression, hazmat and rescue missions this
+> model does not place for, so the comparison is not like-for-like; and the covering model
+> assumes a unit is always free, where real EMS is a queueing system — the standard
+> extension is Daskin's MEXCLP, which this project does not implement.
 
 ---
 
@@ -337,17 +354,37 @@ assumptions):
 | 8 min | 7 | 100% | 100% |
 | 10 min | 5 | 100% | 100% |
 
-The optimised plan reaches comparable coverage from far fewer sites because it is
-placed against demand rather than accumulated historically — and because the real
-network also serves fire suppression, which this EMS-only model does not price in.
+**Those counts are for the default travel constants only.** Re-solving at the 8-minute
+limit across a 4×4 grid of speed (30–45 km/h) and circuity (1.3–1.6) moves the station
+count from 7 to 17 while coverage stays at 100% throughout — the app reports this under
+*Robustness of the station count*, and `covering.assumption_grid()` computes it:
+
+| circuity ↓ / speed → | 30 km/h | 35 km/h | 40 km/h | 45 km/h |
+|---|---|---|---|---|
+| **× 1.3** | 13 | 10 | 8 | **7** |
+| **× 1.4** | 15 | 12 | 9 | 8 |
+| **× 1.5** | 16 | 12 | 10 | 9 |
+| **× 1.6** | **17** | 15 | 12 | 9 |
+
+The optimised plan reaches comparable coverage from fewer sites because it is placed
+against demand rather than accumulated historically — and because the real network also
+serves fire suppression, hazmat and technical rescue, which this EMS-only model does not
+price in. The defensible claim is directional (demand-driven placement needs fewer sites
+than historical placement), not the specific multiple.
 On the busiest hour in the period (Wed 19 Nov 2025, 09:00, 30 simultaneous
 incidents) the assignment LP beat nearest-unit-first greedy dispatch on total
 fleet travel time:
 
 | Ready units | Fleet | Optimal | Greedy | LP better by |
 |---|---|---|---|---|
-| 1 per station | 7 units | 74.40 min | 81.00 min | **8.2%** |
+| 5 per station *(app default)* | 35 units | 252.10 min | 276.40 min | **8.8%** |
 | 2 per station | 14 units | 143.96 min | 149.91 min | **4.0%** |
+| 1 per station | 7 units | 74.40 min | 81.00 min | **8.2%** |
+
+The margin is a function of fleet size, so it only means anything quoted with its row.
+The app opens on 5 units per station because that is the smallest fleet that can field
+all 30 calls of this hour; below it the LP is choosing *which* calls go unanswered as
+well as which unit goes where, which is a different question from the one being asked.
 
 Both sides are measured over the same calls — the first *k* to arrive, where *k*
 is the fleet size. That restriction matters: a peak hour has more calls than

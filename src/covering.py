@@ -247,6 +247,55 @@ def threshold_sweep(
     return pd.DataFrame(rows)
 
 
+def assumption_grid(
+    candidates: pd.DataFrame,
+    zones: pd.DataFrame,
+    threshold_min: float,
+    ahp_scores: np.ndarray | None = None,
+    speeds=None,
+    circuities=None,
+    turnout_min: float | None = None,
+) -> pd.DataFrame:
+    """How many stations the answer needs across the travel assumptions.
+
+    The response times this project optimises are not measured -- the 911 feed
+    carries no response times. They are computed as
+
+        haversine_km x circuity / speed_kmh + turnout
+
+    from two constants a user picks on a slider, so "7 stations cover Seattle
+    at 8 minutes" is a statement about those constants as much as about the
+    city. Re-solving the covering model over a grid of them is what turns that
+    from a hidden assumption into a reported range: the station count roughly
+    doubles between an optimistic and a pessimistic reading of the same map.
+
+    Varies the travel model only. The candidate pool and the AHP tie-break
+    scores are held fixed so the spread that comes back is attributable to the
+    assumption under test and nothing else.
+    """
+    speeds = list(speeds or [30.0, 35.0, 40.0, 45.0])
+    circuities = list(circuities or [1.3, 1.4, 1.5, 1.6])
+    turnout = config.DEFAULT_TURNOUT_MIN if turnout_min is None else turnout_min
+
+    rows = []
+    for spd in speeds:
+        for circ in circuities:
+            tk = dict(speed_kmh=spd, circuity=circ, turnout_min=turnout)
+            res = solve_set_covering(candidates, zones, threshold_min,
+                                     ahp_scores, tk)
+            rows.append({
+                "speed_kmh": spd,
+                "circuity": circ,
+                # The straight-line radius these constants imply at the limit --
+                # the single number that explains every cell in the grid.
+                "reach_km": max(threshold_min - turnout, 0.0) / 60 * spd / circ,
+                "stations_required": res.n_stations,
+                "demand_covered_pct": res.demand_pct,
+                "zones_covered": res.zones_covered,
+            })
+    return pd.DataFrame(rows)
+
+
 def evaluate_fixed_stations(
     stations: pd.DataFrame,
     zones: pd.DataFrame,

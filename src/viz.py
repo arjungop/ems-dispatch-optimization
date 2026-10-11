@@ -355,6 +355,36 @@ def chart_ahp_ranking(df: pd.DataFrame, top_n: int = 15) -> go.Figure:
 # Step 3 -- covering
 # ---------------------------------------------------------------------------
 
+def chart_assumption_grid(df: pd.DataFrame) -> go.Figure:
+    """Stations required across the travel assumptions, as a labelled grid.
+
+    A heatmap because the reading that matters is the gradient, not any single
+    cell: the eye should land on "this doubles across the grid" before it
+    lands on any one number. Every cell still carries its count, since the
+    corner values are the ones that get quoted.
+    """
+    _, _, ink = tokens()
+    piv = df.pivot(index="circuity", columns="speed_kmh", values="stations_required")
+    ramp = seq()
+    fig = go.Figure(go.Heatmap(
+        z=piv.to_numpy(),
+        x=[f"{c:g} km/h" for c in piv.columns],
+        y=[f"×{r:g}" for r in piv.index],
+        colorscale=[[i / (len(ramp) - 1), c] for i, c in enumerate(ramp)],
+        text=piv.to_numpy(), texttemplate="%{text}",
+        textfont=dict(size=13, family=FONT),
+        hovertemplate="%{x} at circuity %{y}<br>"
+                      "%{z} stations for full coverage<extra></extra>",
+        colorbar=dict(title=dict(text="stations", font=dict(color=ink["secondary"])),
+                      tickfont=dict(color=ink["secondary"]), thickness=12),
+        xgap=2, ygap=2,
+    ))
+    fig.update_layout(title="Stations needed across the travel assumptions")
+    fig.update_xaxes(title="effective speed")
+    fig.update_yaxes(title="road circuity", autorange="reversed")
+    return _style(fig, ink, height=320)
+
+
 def chart_threshold_stations(df: pd.DataFrame) -> go.Figure:
     """Stations required at each response limit. One measure, one axis."""
     s, _, ink = tokens()

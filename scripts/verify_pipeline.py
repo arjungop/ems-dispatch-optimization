@@ -215,6 +215,28 @@ check("looser limit never needs more stations",
             .diff().dropna() <= 0).all()))
 check("all sweep solves optimal", bool((sweep["status"] == "Optimal").all()))
 
+print("\n   Assumption grid — speed x circuity at 8 minutes")
+grid = covering.assumption_grid(candidates, zones, 8, cand_ahp)
+piv = grid.pivot(index="circuity", columns="speed_kmh", values="stations_required")
+print("     " + "  ".join(f"{c:g}km/h" for c in piv.columns))
+for circ, row in piv.iterrows():
+    print(f"     x{circ:g}  " + "   ".join(f"{int(v):>4}" for v in row))
+lo, hi = int(grid["stations_required"].min()), int(grid["stations_required"].max())
+print(f"     stations needed ranges {lo}-{hi}; coverage never below "
+      f"{grid['demand_covered_pct'].min():.1f}%")
+
+# The grid is only meaningful if it is monotone in the right directions:
+# a slower fleet or a twistier road network can never need *fewer* stations.
+# Anything else means the travel model or the solver is misbehaving.
+check("grid covers every combination", len(grid) == 16, f"{len(grid)} cells")
+check("slower speed never needs fewer stations",
+      bool((piv.sort_index(axis=1).diff(axis=1).dropna(axis=1) <= 0).all().all()))
+check("higher circuity never needs fewer stations",
+      bool((piv.sort_index().diff().dropna() >= 0).all().all()))
+check("the reported range is a real spread", hi > lo, f"{lo}-{hi} stations")
+check("full coverage holds across every assumption",
+      bool((grid["demand_covered_pct"] > 99.99).all()))
+
 print("\n   Benchmark vs Seattle's 36 real stations")
 for t in [5, 8, 10]:
     ours = covering.solve_set_covering(candidates, zones, t, cand_ahp, TK)
