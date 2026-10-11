@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from . import config, geo
@@ -187,7 +188,31 @@ def build_zones(
     zones = zones.sort_values("demand", ascending=False).reset_index(drop=True)
     zones["demand_share"] = zones["demand"] / zones["demand"].sum()
     zones["material"] = zones["demand_share"] >= min_demand_share
+
+    # How far a real call actually sits from the point that represents it.
+    #
+    # Collapsing a ZIP to one coordinate is the standard demand-point
+    # simplification, but it is not free: the covering model then charges a
+    # station nothing but turnout to reach its own zone, when the average call
+    # in that zone is about a kilometre away. Measuring the spread here lets
+    # `covering.coverage_matrix(within_zone=True)` price that in, and lets the
+    # size of the approximation be reported rather than assumed negligible.
+    zones["spread_km"] = _mean_radius_km(incidents, zones)
     return zones
+
+
+def _mean_radius_km(incidents: pd.DataFrame, zones: pd.DataFrame) -> np.ndarray:
+    """Demand-weighted mean distance from a zone's calls to its centroid."""
+    lat = incidents["latitude"].to_numpy(dtype=float)
+    lon = incidents["longitude"].to_numpy(dtype=float)
+    codes = incidents["zip_code"].astype(str).to_numpy()
+    out = np.zeros(len(zones), dtype=float)
+    for k, (zc, zlat, zlon) in enumerate(zip(zones["zip_code"].astype(str),
+                                             zones["latitude"], zones["longitude"])):
+        m = codes == zc
+        if m.any():
+            out[k] = float(geo.haversine_km(lat[m], lon[m], zlat, zlon).mean())
+    return out
 
 
 def material_zones(zones: pd.DataFrame) -> pd.DataFrame:

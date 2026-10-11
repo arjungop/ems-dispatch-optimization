@@ -234,6 +234,23 @@ check("slower speed never needs fewer stations",
 check("higher circuity never needs fewer stations",
       bool((piv.sort_index().diff().dropna() >= 0).all().all()))
 check("the reported range is a real spread", hi > lo, f"{lo}-{hi} stations")
+
+# The spatial-aggregation cost the Limitations section quantifies. Charging
+# within-zone travel must make the problem strictly harder, never easier, and
+# the paper quotes the eight-minute figure, so it is asserted rather than
+# left to drift the next time the data is refreshed.
+wz = dict(TK, within_zone=True)
+base8 = covering.solve_set_covering(candidates, zones, 8, cand_ahp, TK)
+agg8 = covering.solve_set_covering(candidates, zones, 8, cand_ahp, wz)
+print(f"\n   Within-zone travel at 8 min: {base8.n_stations} stations -> "
+      f"{agg8.n_stations} once each zone's own call radius is charged")
+check("within-zone travel never needs fewer stations",
+      agg8.n_stations >= base8.n_stations,
+      f"{base8.n_stations} -> {agg8.n_stations}")
+check("zones carry a measured call radius",
+      "spread_km" in zones.columns and bool((zones["spread_km"] > 0).all()),
+      f"demand-weighted mean "
+      f"{(zones['spread_km'] * zones['demand']).sum() / zones['demand'].sum():.2f} km")
 check("full coverage holds across every assumption",
       bool((grid["demand_covered_pct"] > 99.99).all()))
 

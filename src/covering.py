@@ -51,16 +51,35 @@ def coverage_matrix(
     speed_kmh: float = config.DEFAULT_SPEED_KMH,
     circuity: float = config.DEFAULT_CIRCUITY,
     turnout_min: float = config.DEFAULT_TURNOUT_MIN,
+    within_zone: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Boolean (candidates x zones) matrix ``a[i][j] = 1`` if i covers j.
 
     Also returns the underlying travel-time matrix so the app can report how
     far outside the limit the misses actually are.
+
+    ``within_zone`` prices in the spatial aggregation this model rests on.
+    Every zone is represented by one point, so centroid-to-centroid travel
+    charges a station nothing but turnout to serve the zone it sits in, while
+    the average real call there is about a kilometre away: roughly 1.9 minutes
+    at the default constants, on an eight-minute budget. Switched on, each
+    zone's own mean call radius (``spread_km``, measured in
+    ``data_loader.build_zones``) is added to every arrival time at that zone.
+
+    It is off by default because the one-point demand abstraction is the
+    standard covering-location formulation and every result reported for this
+    project uses it. The switch exists so the size of the approximation is a
+    measured quantity rather than an assumption: at eight minutes it takes the
+    plan from seven stations to twelve.
     """
     t = geo.time_matrix_min(
         candidates, zones,
         speed_kmh=speed_kmh, circuity=circuity, turnout_min=turnout_min,
     )
+    if within_zone and "spread_km" in zones.columns:
+        access = (zones["spread_km"].to_numpy(dtype=float)
+                  * circuity / speed_kmh * 60.0)
+        t = t + access[None, :]
     return (t <= threshold_min), t
 
 

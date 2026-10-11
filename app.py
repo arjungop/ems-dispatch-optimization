@@ -270,6 +270,14 @@ with st.sidebar:
                   key="circuity")
         st.slider("Turnout time (min)", 0.0, 4.0, config.DEFAULT_TURNOUT_MIN, 0.5,
                   key="turnout")
+        st.toggle(
+            "Charge within-zone travel", value=False, key="within_zone",
+            help="Off (the reported model): each zone is one point, so a "
+                 "station reaches the zone it sits in on turnout time alone. "
+                 "On: each zone's own mean call radius is added to every "
+                 "arrival there, pricing in the spatial aggregation. At the "
+                 "8-minute limit this takes the plan from 7 stations to 12.",
+        )
         min_share_pct = st.slider(
             "Zone materiality floor (% of demand)", 0.0, 1.0,
             100 * data_loader.DEFAULT_MIN_DEMAND_SHARE, 0.05,
@@ -305,6 +313,10 @@ if zones.empty:
     st.stop()
 
 tk = travel_kwargs()
+# Covering-only travel kwargs. `tk` is shared with the assignment LP,
+# the AHP site scorer and the Folium map builders, none of which accept
+# `within_zone`, so the flag travels in its own dict.
+ctk = {**tk, "within_zone": bool(st.session_state.get("within_zone", False))}
 
 st.title(TITLE)
 st.caption(
@@ -692,7 +704,7 @@ with tabs[2]:
             if run:
                 with st.spinner("Solving…"):
                     st.session_state["cover"] = covering.solve_set_covering(
-                        candidates, zones, threshold, cand_ahp, tk)
+                        candidates, zones, threshold, cand_ahp, ctk)
         else:
             # The budget cannot exceed the candidate pool, and the default has to
             # be clamped into that range -- a value above max_value is an error,
@@ -711,7 +723,7 @@ with tabs[2]:
             if run:
                 with st.spinner("Solving…"):
                     st.session_state["cover"] = covering.solve_maximal_covering(
-                        candidates, zones, threshold, p, tk)
+                        candidates, zones, threshold, p, ctk)
 
     res = st.session_state.get("cover")
     if res is None:
@@ -816,7 +828,7 @@ with tabs[2]:
                      key="btn_sweep"):
             with st.spinner("Re-solving at each limit and each budget…"):
                 st.session_state["sweep"] = covering.threshold_sweep(
-                    candidates, zones, config.RESPONSE_THRESHOLDS_MIN, cand_ahp, tk)
+                    candidates, zones, config.RESPONSE_THRESHOLDS_MIN, cand_ahp, ctk)
                 st.session_state["grid"] = covering.assumption_grid(
                     candidates, zones, threshold, cand_ahp,
                     turnout_min=st.session_state["turnout"])
@@ -834,7 +846,7 @@ with tabs[2]:
                 knee = sc.n_stations if sc is not None and sc.n_stations else 8
                 st.session_state["curve"] = covering.marginal_coverage_curve(
                     candidates, zones, threshold,
-                    min(len(candidates), max(4, knee + 3)), tk)
+                    min(len(candidates), max(4, knee + 3)), ctk)
                 st.session_state["curve_knee"] = knee
 
         sweep = st.session_state.get("sweep")
@@ -957,8 +969,8 @@ with tabs[2]:
             rows = []
             with st.spinner("Scoring both plans on identical assumptions…"):
                 for t in config.RESPONSE_THRESHOLDS_MIN:
-                    ours = covering.solve_set_covering(candidates, zones, t, cand_ahp, tk)
-                    theirs = covering.evaluate_fixed_stations(existing_stations, zones, t, tk)
+                    ours = covering.solve_set_covering(candidates, zones, t, cand_ahp, ctk)
+                    theirs = covering.evaluate_fixed_stations(existing_stations, zones, t, ctk)
                     rows.append({"plan": "Optimised placement", "threshold_min": t,
                                  "stations": ours.n_stations,
                                  "demand_covered_pct": ours.demand_pct,

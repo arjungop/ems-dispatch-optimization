@@ -252,6 +252,46 @@ is truncated mid-harvest and is flagged rather than silently dropped. We take
 the most recent twelve months, 27 Aug 2025 to 27 Aug 2026, giving
 \textbf{79{,}152 EMS incidents}, an average of 216 per day.
 
+Twelve months is chosen for two reasons. It is the shortest window containing
+each season exactly once, which matters because monthly EMS volume in the study
+year varies by 19.3\,\% of its mean between the quietest and busiest month: any
+window that is not a whole number of years carries a seasonal bias. Subject to
+that, the shortest such window is the most recent, and station siting should
+follow current demand rather than the city of two decades ago.
+
+We also checked that the choice is not doing the work. Re-running the whole
+pipeline over two, three, five and ten years, and over the entire 23-year
+record, returns \textbf{seven stations at 100\,\% coverage in every case}, with
+an identical set of sites out to five years. Only at ten years and beyond does
+one site move, from 98125 to 98133, when a twenty-ninth zone (98155) finally
+accumulates enough calls to clear the materiality floor and pulls the northern
+station west. The result is therefore a property of Seattle's demand geography
+rather than of the window length.
+
+\begin{table}[htbp]
+\caption{Sensitivity of the eight-minute plan to the study window}
+\label{tab:window}
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lrrrc@{}}
+\toprule
+\textbf{Window} & \textbf{Incidents} & \textbf{Zones} & \textbf{Stations}
+& \textbf{Sites shared} \\
+\midrule
+1 year    &    79{,}152 & 28 & 7 & --- \\
+2 years   &   173{,}371 & 28 & 7 & 7/7 \\
+3 years   &   270{,}224 & 28 & 7 & 7/7 \\
+5 years   &   452{,}309 & 28 & 7 & 7/7 \\
+10 years  &   847{,}570 & 29 & 7 & 6/7 \\
+Entire    & 1{,}704{,}740 & 29 & 7 & 6/7 \\
+\bottomrule
+\end{tabular}
+\\[2pt]
+\footnotesize Coverage is 100\,\% in every row. Sites shared is the overlap
+with the twelve-month plan.
+\end{table}
+
 Each ZIP zone becomes a demand point whose weight is its incident count and
 whose location is the \emph{mean incident coordinate} rather than the polygon
 centroid --- placing the candidate site where the calls actually are.
@@ -641,6 +681,12 @@ against the 36-site real network is not, since seventeen is still less than
 half of thirty-six. We report the range for this reason, and treat the
 directional claim rather than the point estimate as the result.
 
+One bias this grid cannot see is worth naming here. Scaling speed or circuity
+scales every distance together, so no cell of it disturbs the assumption that
+travel inside a zone is free. That assumption is worth about 1.9 minutes on the
+average call and five extra stations at eight minutes; it is quantified in
+Section~\ref{sec:limits}.
+
 The grid is monotone in both directions, which is a necessary condition for it
 to be measuring what it claims: a slower fleet or a more circuitous network can
 never require fewer stations. This is asserted in the verification suite, and
@@ -802,9 +848,27 @@ selection rather than skill.
 We state these explicitly rather than leaving them to be discovered.
 
 \begin{enumerate}
-  \item \textbf{Zone-level aggregation.} Demand is modelled at 28 zone
-    centroids. Incident-level coverage would be stricter and would raise the
-    station count.
+  \item \textbf{Zone-level aggregation, and what it costs.} Demand is
+    modelled at 28 zone centroids, so a station is charged turnout time alone
+    to reach the zone it occupies. Measured against the calls themselves, the
+    demand-weighted mean distance from an incident to its own zone centroid is
+    \textbf{1.04\,km}, about \textbf{1.9 minutes} at the default constants, and
+    1.73\,km at the ninetieth percentile. Charging that within-zone travel
+    raises the eight-minute requirement from \textbf{seven stations to twelve}
+    (five minutes: sixteen to twenty-four; ten minutes: five to six).
+    \texttt{coverage\_matrix(within\_zone=True)} implements it and the
+    application exposes it as a switch, but every figure reported here uses the
+    standard one-point formulation, so the seven should be read as the
+    optimistic end of that pair. Note that this bias is one-directional and is
+    \emph{not} captured by the robustness grid of
+    Section~\ref{sec:robustness}, which scales all distances together and
+    therefore never touches the assumption that intra-zone travel is free.
+
+  \item \textbf{Candidate sites are the demand zones themselves.} A station
+    may only be opened at one of the 28 zone centroids, so the model selects
+    seven of twenty-eight fixed points rather than seven optimal locations in
+    continuous space. A finer candidate lattice would weakly dominate this
+    solution.
   \item \textbf{Euclidean travel with a constant circuity factor.} A single
     multiplier cannot represent bridges, the ship canal, or congestion that
     varies by hour. Seattle's geography is unusually hostile to this
@@ -818,9 +882,14 @@ We state these explicitly rather than leaving them to be discovered.
     does not control the worst case; a minimax or equity-constrained variant
     would trade mean response for tail response.
   \item \textbf{AHP judgements are from four student raters}, not EMS
-    practitioners, and all four happened to be perfectly consistent. The weights
-    should be read as a demonstration of the mechanism rather than as elicited
-    domain preference.
+    practitioners, and all four are \emph{exactly} consistent
+    ($\mathrm{CR}=0.000$). That is a property of the ratings rather than a
+    coincidence: in each member's matrix the density-against-coverage rating is
+    the product of the other two, which is precisely the condition for perfect
+    consistency, so the consistency test cannot fail on this input. The
+    randomised test in Section~\ref{sec:verification} confirms the check itself
+    discriminates; the weights here should nonetheless be read as a
+    demonstration of the mechanism rather than as elicited domain preference.
   \item \textbf{A single peak hour} is used for the dispatch scenario. Results
     across many hours would be a stronger claim than one.
 \end{enumerate}

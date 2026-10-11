@@ -13,8 +13,9 @@ how fast an ambulance actually reaches a patient, and both can be optimized:
 
 ## What this is
 
-A Streamlit application that loads **2.2 million real Seattle 911 records** and runs three
-operations-research models over them:
+A Streamlit application that ingests **2.2 million real Seattle 911 records**, filters them
+to the **79,152 EMS incidents** in a twelve-month study period, and runs three
+operations-research models over those:
 
 | | Model | Question it answers |
 |---|---|---|
