@@ -211,7 +211,7 @@ TEAM = [
     ("Aadith Krishna", "CB.SC.U4AIE23202"),
     ("Aditya Santosh", "CB.SC.U4AIE23207"),
     ("Suryansh Ram Menon", "CB.SC.U4AIE23255"),
-    ("Arjun Gopal", "CB.SC.U4AIE23271"),
+    ("Arjungopal Anilkumar", "CB.SC.U4AIE23271"),
 ]
 
 
@@ -243,7 +243,7 @@ TEAM_JUDGEMENTS: dict[str, dict[tuple[int, int], float]] = {
     "Aadith Krishna":     {(0, 1): 3.0, (0, 2): 6.0, (1, 2): 2.0},
     "Aditya Santosh":     {(0, 1): 2.0, (0, 2): 6.0, (1, 2): 3.0},
     "Suryansh Ram Menon": {(0, 1): 4.0, (0, 2): 8.0, (1, 2): 2.0},
-    "Arjun Gopal":        {(0, 1): 3.0, (0, 2): 9.0, (1, 2): 3.0},
+    "Arjungopal Anilkumar": {(0, 1): 3.0, (0, 2): 9.0, (1, 2): 3.0},
 }
 
 
