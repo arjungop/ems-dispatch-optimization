@@ -66,6 +66,9 @@ Needs **Python 3.10 or newer** (Streamlit's own floor); developed and tested on 
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
+pip install -r requirements-dev.txt   # optional: adds scipy, used only by the
+                                      # verification suite's Hungarian cross-check
+
 python scripts/download_data.py    # ~2.2M real 911 records + stations + ZIP polygons
 python scripts/preprocess.py       # clean, EMS-filter, tag ZIP zones, cache to Parquet
 streamlit run app.py

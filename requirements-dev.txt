@@ -1,0 +1,11 @@
+# Verification-only dependencies. Not needed to run the app, and deliberately
+# kept out of requirements.txt so a deployed container does not carry them.
+#
+#     pip install -r requirements.txt -r requirements-dev.txt
+#     python scripts/verify_pipeline.py
+#
+# Without scipy, verify_pipeline.py still passes, but the independent
+# Hungarian cross-check of the assignment LP is skipped rather than failed.
+# That is a silent gap in the strongest correctness claim the project makes,
+# so anyone re-running the checks should install this file too.
+scipy==1.18.0            # scipy.optimize.linear_sum_assignment, Hungarian algorithm
