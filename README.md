@@ -379,7 +379,7 @@ fleet travel time:
 |---|---|---|---|---|
 | 5 per station *(app default)* | 35 units | 252.10 min | 276.40 min | **8.8%** |
 | 2 per station | 14 units | 143.96 min | 149.91 min | **4.0%** |
-| 1 per station | 7 units | 74.40 min | 81.00 min | **8.2%** |
+| 1 per station | 7 units | 74.40 min | 81.00 min | **8.1%** |
 
 The margin is a function of fleet size, so it only means anything quoted with its row.
 The app opens on 5 units per station because that is the smallest fleet that can field

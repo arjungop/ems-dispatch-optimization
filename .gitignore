@@ -35,3 +35,13 @@ env/
 
 # Serena's local symbol cache and project config — machine-specific.
 .serena/
+
+# LaTeX build artefacts from paper/ (main.tex, slides.tex). The PDFs are
+# committed; the intermediates are not.
+*.aux
+*.log
+*.nav
+*.out
+*.snm
+*.toc
+*.synctex.gz
