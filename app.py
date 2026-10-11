@@ -366,7 +366,7 @@ with tabs[0]:
                 },
             )
     st.caption(
-        f"The {len(top_zones)} busiest ZIP zones carry **{top_share:.1f}%** of all "
+        f"The {len(top_zones)} busiest ZIP zones carry **{top_share:.2f}%** of all "
         f"{len(sel):,} EMS incidents in this period — demand is concentrated enough "
         "that placing stations against it beats spreading them evenly."
     )

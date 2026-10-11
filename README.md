@@ -46,8 +46,10 @@ Headline results over the last 12 months (79,152 EMS incidents, 28 demand zones)
 > turnout`. So this is an optimisation over real demand geography with a modelled travel
 > layer, and its claims are comparative (which sites, in what order, how the answer moves)
 > rather than predictive. Two further caveats, stated here rather than left to be found:
-> Seattle's 36 are *fire* stations carrying suppression, hazmat and rescue missions this
-> model does not place for, so the comparison is not like-for-like; and the covering model
+> the 36 benchmark sites are *fire* facilities carrying suppression, hazmat and rescue
+> missions this model does not place for (and two of the 36 are headquarters and
+> Harborview Medical Center rather than numbered stations), so the comparison is not
+> like-for-like; and the covering model
 > assumes a unit is always free, where real EMS is a queueing system — the standard
 > extension is Daskin's MEXCLP, which this project does not implement.
 
@@ -100,7 +102,7 @@ are needed.
 | Source | What it is | Used for |
 |---|---|---|
 | **Seattle Real-Time Fire 911 Calls** — `data.seattle.gov`, dataset ID `kzjm-xkqj` | ~2.2M incident records, updated every 5 minutes, public domain | The **demand** side: where and when real emergencies occur |
-| **Seattle Fire Stations** — Seattle City GIS | The 36 stations Seattle actually operates | Benchmarking our optimized placement against reality |
+| **Seattle Fire Stations** — Seattle City GIS | 36 SFD facilities: 34 numbered fire stations, department headquarters, and Harborview Medical Center | Benchmarking our optimized placement against reality |
 | **ZIP Code Tabulation Areas** — US Census TIGERweb | ZIP polygons covering the city | Computing each incident's zone |
 
 Fields used from the 911 feed:
@@ -318,7 +320,7 @@ outbound calls except for basemap tiles.
 ## Verification
 
 ```bash
-python scripts/verify_pipeline.py   # 59 checks — every model, on the real data
+python scripts/verify_pipeline.py   # every model, checked on the real data
 python scripts/test_app.py          # 31 checks — drives the app headlessly
 ```
 
@@ -343,7 +345,7 @@ exhaustive enumeration of every possible station subset, the AHP weights are
 checked against the largest-modulus eigenvector on 200 random reciprocal
 matrices, and the dispatch LP is checked against greedy on 150 random cost
 matrices. A solver swap or a drift in how a model is stated therefore cannot
-pass unnoticed. Both suites currently pass in full — 59 and 31 checks, 0
+pass unnoticed. Both suites currently pass in full, 0
 failures.
 
 ### Results on the real data
@@ -380,7 +382,7 @@ fleet travel time:
 
 | Ready units | Fleet | Optimal | Greedy | LP better by |
 |---|---|---|---|---|
-| 5 per station *(app default)* | 35 units | 252.10 min | 276.40 min | **8.8%** |
+| 5 per station *(app default)* | 35 units | 252.06 min | 276.38 min | **8.8%** |
 | 2 per station | 14 units | 143.96 min | 149.91 min | **4.0%** |
 | 1 per station | 7 units | 74.40 min | 81.00 min | **8.1%** |
 

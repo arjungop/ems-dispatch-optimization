@@ -66,14 +66,18 @@ density, equity gap and coverage potential; set-covering and maximal-covering
 integer programs that choose station locations; and a transportation-balanced
 assignment linear program that routes units during a peak hour. On the study
 period the covering model attains full coverage of all material demand with
-seven stations at an eight-minute limit, against the thirty-six stations Seattle
-operates, and the assignment LP reduces total fleet travel time by 8.1\,\% versus
-nearest-unit-first greedy dispatch when both methods are given an identical
-workload. We show that the na\"ive version of that comparison overstates the gain
+seven stations at an eight-minute limit, against the thirty-six facilities
+Seattle operates. Because response times are modelled rather than observed, we
+re-solve across a grid of travel assumptions and report the resulting range,
+seven to seventeen stations, rather than the point estimate; coverage remains
+complete throughout. The assignment LP reduces total fleet travel time by
+8.1\,\% versus nearest-unit-first greedy dispatch at one unit per station, and
+by 8.8\,\% at the five-unit fleet that can field the whole peak hour, when both
+methods are given an identical workload. We show that the na\"ive version of that comparison overstates the gain
 roughly sevenfold, and report the corrected figure. Every model is verified
 against an independent optimum --- brute-force enumeration for the covering
-programs, the Hungarian algorithm for the assignment program --- across 90
-automated checks. The system is delivered as an interactive Streamlit
+programs, the Hungarian algorithm for the assignment program --- and against
+randomised instances. The system is delivered as an interactive Streamlit
 application in which every assumption is adjustable and every model re-solves in
 under a second.
 \end{abstract}
@@ -211,7 +215,7 @@ side is the Seattle Real-Time Fire 911 Calls feed~\cite{seattledata}.
 \midrule
 Seattle Real-Time Fire 911 & 2.2\,M incident & Demand \\
 Calls (\texttt{kzjm-xkqj}) & records & \\
-Seattle Fire Stations (GIS) & 36 stations & Benchmark \\
+Seattle Fire Stations (GIS) & 36 facilities & Benchmark \\
 US Census TIGERweb ZCTA & ZIP polygons & Zoning \\
 \bottomrule
 \end{tabular}
@@ -565,7 +569,9 @@ these weights are ZIP 98104 (score 0.778), 98144 (0.579), 98101 (0.534) and
 Table~\ref{tab:coverage} and Fig.~\ref{fig:sweep} give the central result. At an
 eight-minute limit, \textbf{seven stations cover 100\,\% of material demand};
 tightening to five minutes requires sixteen, and relaxing to ten minutes needs
-only five. Fig.~\ref{fig:map} shows the eight-minute solution against the
+only five. Section~\ref{sec:robustness} qualifies the seven: it is the count
+under the default travel constants, and the figure moves substantially under
+others. Fig.~\ref{fig:map} shows the eight-minute solution against the
 thirty-six stations Seattle actually operates.
 
 \begin{table}[htbp]
@@ -610,11 +616,50 @@ five cover 98\,\%, and the last two buy the remaining 1.8\,\%. Returns diminish
 sharply, which is exactly the regime in which MCLP rather than set covering is
 the right question to ask.
 
+\subsection{Robustness of the station count}
+\label{sec:robustness}
+
+The seven-station figure is a statement about two constants as much as about
+Seattle. The 911 feed records no response times, so every travel time in this
+study is computed from \eqref{eq:traveltime}: a straight-line distance inflated by
+a circuity factor and divided by an effective speed. Both are chosen, not
+measured, and the coverage radius they imply scales linearly in one and
+inversely in the other.
+
+We therefore re-solve the set-covering program over a $4\times4$ grid of those
+constants, holding the candidate pool and the AHP tie-break scores fixed so the
+spread is attributable to the travel model alone. Speeds range over 30 to
+45\,km/h and circuity over 1.3 to 1.6, spanning optimistic and pessimistic
+readings of the same street network. Each cell is an exact ILP solve;
+Fig.~\ref{fig:robustness} reports the sixteen.
+
+The station count required for full coverage ranges from \textbf{seven to
+seventeen}, a factor of 2.4, while demand covered remains at 100\,\% in every
+cell. The two readings of that are different in kind. The \emph{count} is
+assumption-dependent and should not be quoted alone; the \emph{comparison}
+against the 36-site real network is not, since seventeen is still less than
+half of thirty-six. We report the range for this reason, and treat the
+directional claim rather than the point estimate as the result.
+
+The grid is monotone in both directions, which is a necessary condition for it
+to be measuring what it claims: a slower fleet or a more circuitous network can
+never require fewer stations. This is asserted in the verification suite, and
+distinguishes a genuine gradient from solver noise.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\columnwidth]{fig8_robustness.pdf}
+  \caption{Stations required for full coverage at an eight-minute limit, over a
+  grid of the two travel constants. The count varies from seven to seventeen;
+  coverage is complete in all sixteen cells.}
+  \label{fig:robustness}
+\end{figure}
+
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\columnwidth]{fig5_curve.pdf}
   \caption{Marginal coverage against station budget $P$ at an eight-minute
-  limit. Five stations already reach 98.1\,\% of demand.}
+  limit. Five stations already reach 98.2\,\% of demand.}
   \label{fig:curve}
 \end{figure}
 
@@ -698,15 +743,19 @@ cannot silently regress.
 \section{Discussion}
 % ===========================================================================
 
-\subsection{Why seven stations beat thirty-six}
+\subsection{Why the optimised network needs fewer sites}
 
-The optimised network reaches the same coverage from roughly a fifth of the
-sites, and the reason is not that Seattle Fire is badly run. Three factors
+The optimised network reaches the same coverage from a fraction of the sites.
+The fraction itself depends on the travel assumptions (Section~\ref{sec:robustness}),
+but it is below one in every combination tested, and the reason is not that
+Seattle Fire is badly run. Three factors
 explain the gap, and stating them is necessary for the result to be read
 correctly.
 
-\textbf{The real network is not solving this problem.} Seattle's 36 stations
-house fire suppression, rescue and hazardous-materials response as well as EMS.
+\textbf{The real network is not solving this problem.} The 36 benchmark sites
+house fire suppression, rescue and hazardous-materials response as well as EMS,
+and two of them are the department headquarters and Harborview Medical Center
+rather than numbered stations.
 Our model prices only EMS demand, and a station sited for structural fire risk
 in a low-call-volume district is doing work this objective cannot see.
 
@@ -784,9 +833,11 @@ We have presented an integrated decision-support system that solves EMS station
 placement and ambulance dispatch on the same real data and links them, so that
 the stations chosen by a covering ILP serve as the ambulance bases of a dispatch
 LP. On 79{,}152 real Seattle EMS incidents the system attains full coverage of
-all material demand with seven stations at an eight-minute limit, and reduces
-total fleet travel time by 8.1\,\% over nearest-unit-first greedy dispatch under
-a workload-controlled comparison. Every model is cross-checked against an
+all material demand with seven stations at an eight-minute limit, or seven to
+seventeen once the modelled travel constants are varied over a plausible grid,
+and reduces total fleet travel time by 8.1\,\% to 8.8\,\% depending on fleet
+size over nearest-unit-first greedy dispatch under a workload-controlled
+comparison. Every model is cross-checked against an
 independent optimum.
 
 Two results generalise beyond this instance. First, the integration itself:

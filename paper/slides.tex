@@ -182,7 +182,7 @@
     \textbf{Source} & \textbf{What it is} & \textbf{Used for} \\
     \midrule
     Seattle Real-Time Fire 911 Calls & 2,197,739 records, 2003 to 2026 & Where and when emergencies occur \\
-    Seattle Fire Stations (City GIS) & The 36 stations Seattle runs    & Benchmarking our placement \\
+    Seattle Fire Stations (City GIS) & 36 SFD facilities & Benchmarking our placement \\
     ZIP Code Tabulation Areas (Census) & ZIP polygons                  & Assigning each incident a zone \\
     \bottomrule
   \end{tabular}}
@@ -203,7 +203,8 @@
   \centering\caveat{The raw feed mixes fire, alarms and hazmat with EMS.
   Calls are filtered to genuine aid and medic dispatches by whole-word
   patterns, de-duplicated on incident number, and tagged by point-in-polygon
-  join.}
+  join. Of the 36 benchmark facilities, 34 are numbered fire stations; the
+  other two are department headquarters and Harborview Medical Center.}
 \end{frame}
 
 % =========================================================================
@@ -214,8 +215,8 @@
       \centering\includegraphics[height=0.66\textheight]{fig2_demand.pdf}
     \end{column}
     \begin{column}{0.4\textwidth}
-      {\color{inks}The 15 busiest ZIP zones carry \textbf{\color{s1}80.0\%}
-      of all 79,152 incidents.}\\[0.9em]
+      {\color{inks}The 15 busiest ZIP zones carry \textbf{\color{s1}79.97\%}
+      of all 79,152 incidents, and 16 zones take it past four fifths.}\\[0.9em]
       {\color{inks}Zone 98104 alone accounts for \textbf{9,438} calls, which
       is 11.9\% of the city's EMS demand in one ZIP.}\\[0.9em]
       {\footnotesize\color{inkm}Each zone becomes a demand point weighted by
@@ -477,7 +478,7 @@
       {\color{good}\textbf{Measured}}\\[0.5em]
       {\footnotesize\color{inks}
       $\bullet$\ Incident locations, times and counts, from 2.2M actual records\\[0.35em]
-      $\bullet$\ The 36 real station locations\\[0.35em]
+      $\bullet$\ The 36 real SFD facility locations\\[0.35em]
       $\bullet$\ ZIP zone geometry\\[0.35em]
       $\bullet$\ Every optimisation result, solved exactly}
     \end{column}
