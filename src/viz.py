@@ -602,6 +602,13 @@ def _base_map(center=(47.6062, -122.3321), zoom: int = 11) -> folium.Map:
         location=list(center), zoom_start=zoom, control_scale=True,
         tiles=_ESRI.format("Dark" if mode == "dark" else "Light"),
         attr=_ESRI_ATTR, name="Basemap", max_zoom=16,
+        # Leaflet quantises zoom to whole levels by default, and fit_bounds
+        # has to round *down* to guarantee the bounds fit. Each level is a
+        # factor of two, so a frame needing zoom 11.9 gets 11 and the subject
+        # ends up at half the size it could be -- which is most of why these
+        # maps read as mostly Puget Sound. A quarter-level snap costs nothing
+        # and recovers almost all of it.
+        zoomSnap=0.25, zoomDelta=0.25,
     )
     # Leaflet's own controls are styled for a generic map product; these bring
     # the zoom buttons, scale bar and legend into the app's own border radius,
@@ -645,11 +652,44 @@ def _base_map(center=(47.6062, -122.3321), zoom: int = 11) -> folium.Map:
   .ems-legend .ends {{
       display: flex; justify-content: space-between; gap: 18px;
       font-size: 11px; color: {ink["secondary"]}; margin-top: 4px; }}
+  .ems-legend .row {{
+      display: flex; align-items: center; gap: 7px; font-size: 11px;
+      color: {ink["secondary"]}; line-height: 1.6; white-space: nowrap; }}
+  .ems-legend .sw {{
+      width: 11px; height: 11px; border-radius: 50%; flex: none;
+      border: 1.2px solid {ink["surface"]};
+      box-shadow: 0 0 0 1px {ink["grid"]}; }}
+  .ems-legend .sw.ring {{ background: transparent; border: 1.4px solid currentColor; }}
+  .ems-legend .sw.line {{
+      width: 14px; height: 0; border-radius: 0; box-shadow: none;
+      border: 0; border-top: 2.5px solid currentColor; }}
 </style>"""))
     return m
 
 
-def _fit(m: folium.Map, lats, lons, pad: float = 0.08) -> None:
+def _key_legend(m: folium.Map, caption: str, items: list[tuple[str, str, str]]) -> None:
+    """A swatch-and-label key, in the same shell as the ramp legend.
+
+    The coverage and dispatch maps encode four things in colour and shape
+    between them and carried no key at all: green against red is covered
+    against not, blue is a station, a pale ring is its reach, a line is a
+    dispatch. All of that lived only in the caption under the card, which is
+    not where a reader looks while reading a map, and is lost entirely if the
+    figure is screenshotted into a slide.
+
+    ``items`` is (kind, colour, label) where kind is "dot", "ring" or "line".
+    """
+    rows = "".join(
+        f'<div class="row"><span class="sw {kind if kind != "dot" else ""}" '
+        f'style="{"color" if kind in ("ring", "line") else "background"}:{col}">'
+        f'</span>{label}</div>'
+        for kind, col, label in items)
+    m.get_root().html.add_child(folium.Element(
+        f'<div class="ems-legend"><span class="cap">{caption}</span>{rows}</div>'))
+
+
+def _fit(m: folium.Map, lats, lons, pad_frac: float = 0.06,
+         pad_km: float = 0.0) -> None:
     """Frame the map on what it actually plots, rather than trusting a fixed
     zoom_start against a hardcoded Seattle center.
 
@@ -674,9 +714,22 @@ def _fit(m: folium.Map, lats, lons, pad: float = 0.08) -> None:
         # centred on it instead of asking Leaflet to zoom in on nothing.
         m.location = [lat_min, lon_min]
         return
-    # A small fixed pad (in degrees) rather than Leaflet's own padding option,
-    # so a one-station result still frames with visible context around it.
-    m.fit_bounds([[lat_min - pad, lon_min - pad], [lat_max + pad, lon_max + pad]])
+    # Padding is a fraction of the plotted extent, not a fixed number of
+    # degrees. A flat 0.08 deg was "a small pad" only in the abstract: Seattle's
+    # demand zones span 0.216 deg of latitude and 0.138 of longitude, so
+    # padding each side by 0.08 inflated the frame 74% vertically and 116%
+    # horizontally and left the city occupying a third of the picture.
+    #
+    # ``pad_km`` is for layers drawn *around* the points rather than on them:
+    # the coverage map plots a reach circle several km wide at each station, and
+    # fitting to the station coordinates alone clips the outermost circles.
+    dlat, dlon = lat_max - lat_min, lon_max - lon_min
+    # 1 deg of latitude is ~111 km; a degree of longitude shrinks with the
+    # cosine of the latitude, ~75 km at Seattle's 47.6 deg N.
+    pad_lat = max(dlat * pad_frac, 0.004) + pad_km / 111.0
+    pad_lon = max(dlon * pad_frac, 0.004) + pad_km / 74.9
+    m.fit_bounds([[lat_min - pad_lat, lon_min - pad_lon],
+                  [lat_max + pad_lat, lon_max + pad_lon]])
 
 
 def _dot_icon(color: str, size: int = 18) -> folium.DivIcon:
@@ -739,15 +792,29 @@ def map_demand(zones: pd.DataFrame, zip_geojson: dict | None = None) -> folium.M
             tooltip=folium.GeoJsonTooltip(fields=["ZCTA5"], aliases=["ZIP:"]),
         ).add_to(m)
 
-    dmax = max(vmax, 1.0)
-    fg = folium.FeatureGroup(name="Zone demand")
+    # A small fixed dot, not a graduated bubble. The bubble encoded incident
+    # count by area while the choropleth underneath encoded the same incident
+    # count by colour: one variable drawn twice, and at the zoom these maps
+    # now sit at the larger bubbles covered the very zones whose shade they
+    # were duplicating -- 98104, the densest zone on the map, was almost
+    # entirely hidden beneath them.
+    #
+    # Magnitude is the choropleth's job. The dot's job is the thing nothing
+    # else on the map shows: where the zone's *demand point* falls, which is
+    # the mean incident coordinate, the candidate station site, and the single
+    # location the model collapses the whole zone onto.
+    s, _st2, _ink2 = tokens()
+    fg = folium.FeatureGroup(name="Demand points")
     for _, r in zones.iterrows():
+        spread = float(r["spread_km"]) if "spread_km" in zones else 0.0
         folium.CircleMarker(
             location=[r["latitude"], r["longitude"]],
-            radius=6 + 22 * (float(r["demand"]) / dmax) ** 0.5,
-            color=ink["surface"], weight=1.5, fill=True,
-            fill_color=ramp(float(r["demand"])), fill_opacity=0.85,
-            tooltip=f"ZIP {r['zip_code']}: {int(r['demand']):,} EMS incidents",
+            radius=4.5, color=ink["surface"], weight=1.4, fill=True,
+            fill_color=s[1], fill_opacity=0.95,
+            tooltip=(f"ZIP {r['zip_code']}: {int(r['demand']):,} EMS incidents<br>"
+                     f"demand point; mean call sits {spread:.2f} km from it"
+                     if spread else
+                     f"ZIP {r['zip_code']}: {int(r['demand']):,} EMS incidents"),
         ).add_to(fg)
     fg.add_to(m)
 
@@ -812,10 +879,19 @@ def map_coverage(result, existing: pd.DataFrame | None = None,
         fg_e.add_to(m)
 
     folium.LayerControl(collapsed=True, position="topleft").add_to(m)
+    _key_legend(m, f"{result.threshold_min:g}-minute plan", [
+        ("dot", s[1], "Opened station"),
+        ("ring", s[1], f"Its reach (~{reach_km:.1f} km)"),
+        ("dot", status["good"], "Zone covered"),
+        ("dot", status["critical"], "Zone not covered"),
+    ])
     # Framed on the zone table rather than the opened stations alone, so an
     # early-budget Mode-B result (few stations, same zones) still shows the
     # uncovered zones it left out instead of cropping to just what it chose.
-    _fit(m, zt["latitude"], zt["longitude"])
+    # The reach circles are drawn around those points, so the frame has to
+    # allow for one radius or the outermost circles are clipped at the edge.
+    _fit(m, zt["latitude"], zt["longitude"],
+         pad_km=reach_km if show_radius else 0.0)
     return m
 
 
@@ -854,6 +930,12 @@ def map_dispatch(result, ambulances: pd.DataFrame) -> folium.Map:
     fg_i.add_to(m)
 
     folium.LayerControl(collapsed=True, position="topleft").add_to(m)
+    _key_legend(m, "Dispatch plan", [
+        ("dot", s[1], "Ambulance base"),
+        ("dot", status["good"], "Incident served"),
+        ("dot", status["critical"], "Incident unserved"),
+        ("line", s[1], "Base to incident"),
+    ])
     _fit(m, pd.concat([ambulances["latitude"], result.assignments["latitude"]]),
          pd.concat([ambulances["longitude"], result.assignments["longitude"]]))
     return m

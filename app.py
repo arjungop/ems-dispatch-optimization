@@ -27,6 +27,13 @@ st.set_page_config(
 )
 
 MAP_H = 480
+# The two full-width maps get a taller frame than the half-width one. Seattle
+# is a tall, narrow city -- the demand zones span about 24 km north to south
+# against 10 km east to west -- and fit_bounds has to satisfy both axes, so a
+# full-width 480px map is a 2.5:1 letterbox showing a 1:2 shape: the city ends
+# up a thin ribbon with Puget Sound and Bellevue filling the rest. A taller
+# frame is the only lever that does not shrink the map.
+MAP_H_WIDE = 620
 
 # Streamlit's dataframe row pitch: the bundled grid draws a 32px row plus a 1px
 # separator, and the header row occupies the same 33px. Heights are derived from
@@ -445,8 +452,9 @@ with tabs[0]:
     with c2:
         with st.container(border=True):
             st.markdown("**Demand across the city**")
-            st.caption("Circle area is incident volume; shading fills the ZIP zone "
-                       "it belongs to. Hover any zone for its exact count.")
+            st.caption("Shading is the zone's incident count. Each dot is that "
+                       "zone's demand point, the mean call location that the "
+                       "models collapse it onto. Hover either for exact figures.")
             st_folium(viz.map_demand(zones, zip_geojson), height=MAP_H,
                       width="stretch", returned_objects=[], key="map_demand")
 
@@ -812,7 +820,7 @@ with tabs[2]:
             st.caption(f"Shaded circles are the {res.threshold_min:g}-minute reach of "
                        "each opened station. Zone dots are green where covered, red "
                        "where not.")
-            st_folium(viz.map_coverage(res, existing_stations, True, **tk), height=MAP_H,
+            st_folium(viz.map_coverage(res, existing_stations, True, **tk), height=MAP_H_WIDE,
                       width="stretch", returned_objects=[], key="map_cover")
 
     st.subheader("Sensitivity analysis", divider="gray")
@@ -1263,5 +1271,5 @@ with tabs[3]:
                 st.markdown("**Dispatch plan on the map**")
                 st.caption("Lines run from each ambulance base to the incident it was "
                            "sent to. Red dots are calls no unit could reach.")
-                st_folium(viz.map_dispatch(a, st.session_state["asg_amb"]), height=MAP_H,
+                st_folium(viz.map_dispatch(a, st.session_state["asg_amb"]), height=MAP_H_WIDE,
                           width="stretch", returned_objects=[], key="map_dispatch")
