@@ -97,6 +97,16 @@ def km_col(label: str, **kw):
     return st.column_config.NumberColumn(label, format="%.2f km", **kw)
 
 
+def article(n) -> str:
+    """"a" or "an" for a response-time limit, chosen by how it is said.
+
+    Of the limits the sidebar offers (4-10, 12, 15) only 8 takes "an", so this
+    is a small table rather than a rule about vowels: "an 8-minute limit" but
+    "a 4-minute limit".
+    """
+    return "an" if int(n) in (8, 11, 18) else "a"
+
+
 def fmt_seconds(s: float) -> str:
     """A solve time that stays a measurement at every scale.
 
@@ -800,7 +810,7 @@ with tabs[2]:
             f"Two sweeps over the same candidate pool: the covering model re-solved at "
             f"{', '.join(f'{t:g}' for t in config.RESPONSE_THRESHOLDS_MIN)} minutes, and "
             f"the maximal-covering model re-solved at every budget from one station "
-            f"upwards at the current {threshold:g}-minute limit."
+            f"upwards at the response-time limit set in the sidebar."
         )
         if st.button("Run both sweeps", icon=":material/query_stats:",
                      key="btn_sweep"):
@@ -810,6 +820,13 @@ with tabs[2]:
                 st.session_state["grid"] = covering.assumption_grid(
                     candidates, zones, threshold, cand_ahp,
                     turnout_min=st.session_state["turnout"])
+                # The limit these results were computed at, so the captions
+                # below can name it instead of naming whatever the slider says
+                # now. Session state survives a slider move, so without this a
+                # grid solved at 8 minutes sits under the words "the current 4
+                # minute limit" the moment the slider is dragged, which is the
+                # one failure mode worse than showing no result at all.
+                st.session_state["sweep_at"] = threshold
                 # Carried only as far as the budget that first reaches full
                 # coverage, plus a couple of stations to show the curve has
                 # flattened: every further P re-solves an ILP for a flat line.
@@ -822,7 +839,16 @@ with tabs[2]:
 
         sweep = st.session_state.get("sweep")
         curve = st.session_state.get("curve")
+        swept_at = st.session_state.get("sweep_at")
         if sweep is not None:
+            if swept_at is not None and swept_at != threshold:
+                st.warning(
+                    f"These were solved at {article(swept_at)} **{swept_at:g}-minute** limit; the sidebar "
+                    f"now says **{threshold:g}**. Run the sweeps again to match.",
+                    icon=":material/update:",
+                )
+            elif swept_at is not None:
+                st.caption(f"Budget curve solved at the {swept_at:g}-minute limit.")
             c1, c2 = st.columns(2, vertical_alignment="top")
             with c1:
                 st.plotly_chart(viz.chart_threshold_stations(sweep), width="stretch")
@@ -876,6 +902,16 @@ with tabs[2]:
             st.info("Run the sweeps above to fill this in — the grid is solved alongside them.",
                     icon=":material/arrow_upward:")
         else:
+            # Same staleness guard as the sweeps: the grid is solved at one
+            # limit and the sidebar can move underneath it afterwards.
+            if swept_at is not None and swept_at != threshold:
+                st.warning(
+                    f"Solved at {article(swept_at)} **{swept_at:g}-minute** limit, not the "
+                    f"**{threshold:g}** now set in the sidebar.",
+                    icon=":material/update:",
+                )
+            elif swept_at is not None:
+                st.caption(f"Every cell solved at the {swept_at:g}-minute limit.")
             lo, hi = int(grid["stations_required"].min()), int(grid["stations_required"].max())
             worst_cover = float(grid["demand_covered_pct"].min())
             g1, g2 = st.columns([3, 2], vertical_alignment="top")
@@ -1079,7 +1115,14 @@ with tabs[3]:
             icon=":material/local_shipping:")
         kpi(k, "Capacity gap", f"{gap}", icon=":material/balance:",
             help_text="Calls with no unit left to send, before the model is solved.")
-        kpi(k, "Response-time limit", f"{threshold:g} min", icon=":material/speed:")
+        # Deliberately the live sidebar limit, not the one the stations were
+        # placed at: placing at 8 minutes and then asking how the plan reads
+        # against a 6-minute standard is a real question. The caption above
+        # names the plan's own limit, so the two are distinguishable.
+        kpi(k, "Response-time limit", f"{threshold:g} min", icon=":material/speed:",
+            help_text=f"The limit responses are judged against here. The bases "
+                      f"themselves come from the {res.threshold_min:g}-minute plan "
+                      "named above.")
 
         if st.button("Solve the assignment model", type="primary",
                      icon=":material/route:"):
