@@ -200,11 +200,10 @@
     \end{column}
   \end{columns}
   \vspace{1.0em}
-  \centering\caveat{The raw feed mixes fire, alarms and hazmat with EMS.
-  Calls are filtered to genuine aid and medic dispatches by whole-word
-  patterns, de-duplicated on incident number, and tagged by point-in-polygon
-  join. Of the 36 benchmark facilities, 34 are numbered fire stations; the
-  other two are department headquarters and Harborview Medical Center.}
+  \centering\caveat{The raw feed mixes fire, alarms and hazmat with EMS, so
+  calls are filtered to genuine aid and medic dispatches. Of the 36 benchmark
+  facilities, 34 are numbered fire stations; the other two are headquarters
+  and Harborview Medical Center.}
 \end{frame}
 
 % =========================================================================
@@ -256,14 +255,13 @@
         Coverage Potential  & \phantom{0}9.4\% \\
         \bottomrule
       \end{tabular}}\\[1.0em]
-      {\footnotesize\color{inks}Four team members rate the three criteria
-      pairwise on Saaty's 1 to 9 scale, independently. The matrices are
-      combined by \textbf{element-wise geometric mean}, the only average that
-      keeps the matrix reciprocal.}
+      {\footnotesize\color{inks}Four members rate the criteria pairwise on
+      Saaty's 1 to 9 scale. Matrices combine by \textbf{geometric mean}, the
+      only average that stays reciprocal.}
     \end{column}
     \begin{column}{0.5\textwidth}
-      {\color{inks}Weights are the principal eigenvector. Pairwise human
-      judgements can quietly contradict each other, so AHP measures that:}\\[0.6em]
+      {\color{inks}Weights are the principal eigenvector. Human judgements
+      can contradict each other, so AHP measures that:}\\[0.6em]
       \centering
       $\mathrm{CI}=\dfrac{\lambda_{\max}-n}{n-1}, \qquad
        \mathrm{CR}=\dfrac{\mathrm{CI}}{\mathrm{RI}}$\\[0.9em]
@@ -274,14 +272,13 @@
         3.0000 & 0.0000 & 0.58 & \textbf{\color{good}0.0000} \\
         \bottomrule
       \end{tabular}\\[0.7em]
-      {\footnotesize\color{good}$\mathrm{CR}<0.10$ for all four members
-      individually and for the aggregate.}
+      {\footnotesize\color{good}$\mathrm{CR}<0.10$ for all four members and
+      the aggregate.}
     \end{column}
   \end{columns}
   \vspace{0.6em}
-  \caveat{CR is exactly zero by construction rather than by luck: each
-  member's density-against-coverage rating is the product of their other two,
-  so the judgements contain no contradiction for the check to find.}
+  \caveat{CR is zero by construction, not luck: each member's
+  density-against-coverage rating is the product of their other two.}
 \end{frame}
 
 % =========================================================================
@@ -434,10 +431,8 @@
       incidents}, dispatched from the \textbf{7 stations the covering model
       opened}.}\\[0.8em]
       {\footnotesize\color{inks}A rectangular cost matrix is padded with
-      zero-cost dummy rows or columns so the problem is square and balanced.
-      Dummy cells cost nothing, so they never distort the real total.}\\[0.8em]
-      {\footnotesize\color{inkm}Cross-checked against an independent
-      Hungarian-algorithm solution, which agrees to six decimal places.}
+      zero-cost dummy rows or columns, so the problem is square and always
+      feasible. Dummies cost nothing, so they never distort the total.}
     \end{column}
   \end{columns}
 \end{frame}
@@ -477,7 +472,7 @@
     \begin{column}{0.48\textwidth}
       {\color{good}\textbf{Measured}}\\[0.5em]
       {\footnotesize\color{inks}
-      $\bullet$\ Incident locations, times and counts, from 2.2M actual records\\[0.35em]
+      $\bullet$\ Incident locations, times and counts, 2.2M records\\[0.35em]
       $\bullet$\ The 36 real SFD facility locations\\[0.35em]
       $\bullet$\ ZIP zone geometry\\[0.35em]
       $\bullet$\ Every optimisation result, solved exactly}
@@ -486,44 +481,36 @@
       {\color{s2}\textbf{Modelled}}\\[0.5em]
       {\footnotesize\color{inks}
       $\bullet$\ \textbf{Every response time}, since the feed contains none\\[0.35em]
-      $\bullet$\ Demand aggregated to 28 zone centroids, worth
-      \textbf{+1.9 min} on the average call\\[0.35em]
-      $\bullet$\ AHP weights, subjective by design, hence the CR test\\[0.35em]
-      $\bullet$\ Units assumed always free, with no queueing}
+      $\bullet$\ Demand aggregated to 28 centroids, worth
+      \textbf{+1.8 min} per call\\[0.35em]
+      $\bullet$\ AHP weights, subjective by design\\[0.35em]
+      $\bullet$\ Units always free, no queueing}
     \end{column}
   \end{columns}
   \vspace{1.0em}
   \hairline[0.6em]
-  {\footnotesize\color{inks}Charging that within-zone travel takes the
-  eight-minute plan from \textbf{7 stations to 12}, and the robustness grid
-  cannot see it: scaling speed and circuity moves every distance together.
-  This is an optimisation over \textbf{real demand geography} with a
-  \textbf{modelled travel layer}. Its claims are therefore
-  comparative, about which sites, in what order, and how far the answer moves,
-  rather than predictive. That is why the robustness grid is a result slide
-  and not an appendix.}
+  {\footnotesize\color{inks}Charging that within-zone travel takes the plan
+  from \textbf{7 stations to 12}, and the robustness grid cannot see it.
+  \textbf{Real demand geography, modelled travel layer}: the claims are
+  comparative, not predictive.}
 \end{frame}
 
 % =========================================================================
 \begin{frame}{How the models were checked}
   \vspace{0.5em}
-  {\color{inks}Each optimisation is validated against an independent method
-  rather than assumed correct:}\\[0.9em]
+  {\color{inks}Each model is checked against an independent method, not
+  assumed correct:}\\[0.9em]
   {\footnotesize\color{inks}
-  $\bullet$\ \textbf{Set covering and maximal covering} were re-solved by
-  \textbf{brute-force enumeration} on small instances, where every subset of
-  candidate sites can be checked exhaustively. The ILP matched the enumerated
-  optimum on each one.\\[0.6em]
-  $\bullet$\ \textbf{AHP weights} were compared against the largest-modulus
-  eigenvector computed directly by NumPy, over randomly generated reciprocal
-  matrices.\\[0.6em]
-  $\bullet$\ \textbf{The assignment LP} was cross-checked against an
-  independent Hungarian-algorithm implementation, agreeing to six decimal
-  places, and was confirmed never to lose to the greedy baseline over
-  randomly generated cost matrices.\\[0.6em]
-  $\bullet$\ \textbf{The robustness grid} is checked for monotonicity in both
-  directions: a slower fleet or a twistier road network can never need fewer
-  stations. That is what separates a real gradient from solver noise.}
+  $\bullet$\ \textbf{Both covering models}, against \textbf{brute-force
+  enumeration} of every possible subset, 25 instances each. Matched every
+  time.\\[0.6em]
+  $\bullet$\ \textbf{AHP weights}, against NumPy's largest-modulus
+  eigenvector, over 200 random reciprocal matrices.\\[0.6em]
+  $\bullet$\ \textbf{The assignment LP}, against an independent Hungarian
+  solution, to six decimal places, and never losing to greedy over 150
+  random cost matrices.\\[0.6em]
+  $\bullet$\ \textbf{The robustness grid}, checked for monotonicity: a slower
+  fleet or a twistier network can never need fewer stations.}
 \end{frame}
 
 % =========================================================================
@@ -547,8 +534,7 @@
       $\bullet$\ Speed, circuity and turnout\\[0.3em]
       $\bullet$\ Station budget and fleet size}\\[0.9em]
       {\footnotesize\color{inkm}Built with Streamlit. Every solve runs
-      in-process on the machine serving the app; the only outbound requests
-      are for basemap tiles.}
+      in-process; the only outbound requests are for basemap tiles.}
     \end{column}
   \end{columns}
 \end{frame}
@@ -558,25 +544,21 @@
   \vspace{0.6em}
   {\color{inks}
   $\bullet$\ Demand-driven placement reaches the whole city from
-  \textbf{fewer sites} than Seattle's historically accumulated network. The
-  finding is directional and survives every travel assumption we
-  tested.\\[0.7em]
-  $\bullet$\ The station count itself is \textbf{7 to 17}, not 7. Reporting
-  the range is the result; reporting the point estimate would have been the
-  mistake.\\[0.7em]
+  \textbf{fewer sites} than Seattle's historically accumulated network, in
+  every travel assumption we tested.\\[0.7em]
+  $\bullet$\ The count itself is \textbf{7 to 17}, not 7. Reporting the range
+  is the result.\\[0.7em]
   $\bullet$\ Optimal dispatch beats nearest-unit-first by \textbf{8.8\%} of
-  total fleet travel time on the busiest hour at the default fleet, measured
-  like-for-like. The margin depends on fleet size, so it is only meaningful
-  quoted with its configuration.\\[0.7em]
+  fleet travel time, like-for-like. The margin moves with fleet
+  size.\\[0.7em]
   $\bullet$\ The two models \textbf{compose}: covering output becomes
-  assignment input, so a siting decision is evaluated by the dispatch
-  performance it enables.}
+  assignment input, so a siting decision is judged by the dispatch it
+  enables.}
   \vspace{1.0em}
   \hairline[0.5em]
-  {\footnotesize\color{inks}\textbf{Next:} replace the modelled travel layer
-  with real road-network distances, and extend the covering model to
-  \textbf{MEXCLP} (Daskin, 1983) so that unit busy-fraction is priced in
-  rather than assumed away.}
+  {\footnotesize\color{inks}\textbf{Next:} road-network distances in place of
+  the modelled travel layer, and \textbf{MEXCLP} (Daskin, 1983) to price in
+  unit busy-fraction.}
 \end{frame}
 
 % =========================================================================

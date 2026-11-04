@@ -36,8 +36,8 @@ env/
 # Serena's local symbol cache and project config — machine-specific.
 .serena/
 
-# LaTeX build artefacts from paper/ (main.tex, slides.tex). The PDFs are
-# committed; the intermediates are not.
+# LaTeX build artefacts from paper/ (main.tex, slides.tex). Neither the
+# intermediates nor the compiled documents are committed.
 *.aux
 *.log
 *.nav
@@ -45,3 +45,18 @@ env/
 *.snm
 *.toc
 *.synctex.gz
+
+# Compiled documents and slide decks. The .tex sources under paper/ are the
+# record; the PDFs they produce are rebuilt with `make` (see paper/).
+*.pdf
+*.ppt
+*.pptx
+*.doc
+*.docx
+
+# ...except the figures, which are vector inputs the paper compiles against,
+# not outputs. Regenerate them with `python paper/make_figures.py`.
+!paper/figures/*.pdf
+
+# Pasted screenshots
+Pasted *.png

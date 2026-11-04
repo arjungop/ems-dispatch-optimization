@@ -1,0 +1,553 @@
+%% UI Reference -- every control, metric, table column and formula in app.py.
+%% Build:  cd paper && pdflatex ui_reference && pdflatex ui_reference
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\usepackage{parskip}
+
+\setlist[description]{style=unboxed, leftmargin=0pt, font=\normalfont\bfseries}
+
+\title{Dynamic EMS Dispatch \& Station Placement Optimization\\[4pt]
+\large UI Reference: Controls, Metrics and Formulas}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+\section*{How to read this document}
+The application has a persistent sidebar and four tabs: \emph{Data}, \emph{Site
+Scoring}, \emph{Station Placement} and \emph{Dispatch}. Each section below
+matches one of those regions, in the order its controls and outputs appear on
+screen. Every term is given a plain-language definition; where it is backed by
+a formula, the formula follows immediately.
+
+\section{Sidebar: Study Period and Response-Time Model}
+
+\subsection{Study period}
+\begin{description}
+  \item[Quick range] A preset date window applied to the whole app: \emph{Last
+    30 days}, \emph{Last 12 months} (default), \emph{Last 3 years},
+    \emph{Entire dataset}, or \emph{Custom}. Every chart, table and model
+    downstream is computed only on incidents inside the chosen window.
+  \item[Date range (Custom)] Appears only when \emph{Quick range} is set to
+    \emph{Custom}. A start and end calendar date bounding the incidents used.
+  \item[Include trauma \& rescue calls] A toggle, off by default. When off,
+    only \emph{core} EMS dispatches count as demand (calls whose type matches
+    aid, medic, medical, EMS, AMR, nurseline, triaged, low acuity, overdose,
+    cardiac or CPR). When on, \emph{trauma} calls are added as well: those
+    typed by their cause rather than their medical nature (MVI/motor vehicle,
+    rescue, scenes of violence, assault, casualty, drowning, extrication).
+\end{description}
+
+\subsection{Response-time model}
+\begin{description}
+  \item[Response-time limit (min)] The single number every optimisation model
+    is steered by: the maximum time from alarm to on-scene arrival that counts
+    as ``covered.'' Chosen from \{4, 5, 6, 7, 8, 9, 10, 12, 15\} minutes.
+  \item[Implied reach] A read-only caption under the limit slider, converting
+    the time limit into the straight-line distance it corresponds to under the
+    current speed/circuity/turnout settings:
+    \[
+      r \;=\; \max(t_{\text{limit}} - \tau,\,0)\cdot\frac{v}{60\,\kappa}
+    \]
+    where $t_{\text{limit}}$ is the response-time limit (min), $\tau$ is
+    turnout time (min), $v$ is effective speed (km/h) and $\kappa$ is the road
+    circuity factor. $r$ is reported in km.
+\end{description}
+
+\subsubsection*{Model assumptions (expander)}
+\begin{description}
+  \item[Effective speed (km/h)] The assumed average road speed of a responding
+    ambulance, $v$. Slider range 20--80, default \textbf{45}.
+  \item[Road circuity factor] A multiplier $\kappa \geq 1$ that inflates
+    straight-line (great-circle) distance into an estimate of actual
+    street-network distance, since real roads are not straight lines. Slider
+    range 1.0--1.8, default \textbf{1.30}.
+  \item[Turnout time (min)] A fixed delay $\tau$ added to every response,
+    representing the time between an alarm sounding and the crew actually
+    leaving the station -- before any driving begins. Slider range 0--4,
+    default \textbf{1.0}.
+  \item[Travel-time formula] The equation these three constants feed, used by
+    every model in the app to turn a straight-line distance into a response
+    time:
+    \[
+      t_{ij} \;=\; \tau \;+\; \frac{60\,\kappa\, d_{ij}}{v}
+    \]
+    where $d_{ij}$ is the great-circle (Haversine) distance in km between
+    point $i$ and point $j$, and $t_{ij}$ is the resulting travel time in
+    minutes. The Haversine distance itself is
+    \[
+      a = \sin^2\!\Big(\tfrac{\Delta\phi}{2}\Big) + \cos\phi_1\cos\phi_2
+          \sin^2\!\Big(\tfrac{\Delta\lambda}{2}\Big), \qquad
+      d = 2R\arcsin\!\big(\sqrt{a}\big)
+    \]
+    with $R = 6371.0088$ km, $\phi$ latitude and $\lambda$ longitude in
+    radians.
+  \item[Charge within-zone travel] A toggle, \textbf{off} by default. Every
+    demand zone is represented by a single point (its mean call location), so
+    with the toggle off a station is charged only turnout time to reach the
+    zone it sits in -- the standard covering-location simplification, and the
+    one every reported result in the project's paper uses. Switched on, each
+    zone's own mean call radius (how far its real incidents typically sit from
+    that single point) is added to every arrival time there:
+    \[
+      t_{ij}' \;=\; t_{ij} \;+\; \frac{\kappa}{v}\cdot
+        \text{spread\_km}_{j}\cdot 60
+    \]
+    This makes the covering model more conservative (more stations needed for
+    the same limit) because it no longer treats intra-zone travel as free.
+  \item[Zone materiality floor (\% of demand)] A threshold $f_{\min}$, default
+    \textbf{0.1\%}, slider range 0--1\%. A demand zone is kept in the
+    optimisation models only if its share of total period demand clears the
+    floor:
+    \[
+      \text{demand\_share}_j \;=\; \frac{d_j}{\sum_k d_k} \;\geq\; f_{\min}
+    \]
+    where $d_j$ is zone $j$'s incident count. Zones below the floor remain
+    visible in every table but are excluded from the covering and dispatch
+    models, so a handful of stray mutual-aid calls in a far suburb cannot
+    force a dedicated station of their own.
+\end{description}
+
+\section{Data Tab}
+
+\subsection{Headline metrics}
+\begin{description}
+  \item[EMS incidents] Total incident count in the selected period.
+  \item[Demand zones] Number of ZIP-code zones that clear the materiality
+    floor and are therefore planned around.
+  \item[Avg per day] Mean incidents per calendar day in the period:
+    \[
+      \text{per\_day} \;=\; \frac{\#\text{incidents}}{\#\text{distinct calendar days present}}
+    \]
+  \item[Busiest zone] The single ZIP zone with the highest incident count in
+    the period.
+  \item[Peak hour] The clock hour (00--23) with the most incidents summed
+    across every day in the period (e.g.\ every 13:00--14:00 slot, not one
+    specific date).
+\end{description}
+
+\subsection{Where demand concentrates}
+\begin{description}
+  \item[Busiest-zones chart and table] The top 15 ZIP zones ranked by incident
+    count, each row showing its \textbf{Incidents} count and \textbf{Share}
+    of all incidents in the period:
+    \[
+      \text{share\_pct}_j \;=\; 100\cdot\frac{\text{incidents}_j}{\sum_k \text{incidents}_k}
+    \]
+  \item[Cumulative-share caption] States the combined share of all incidents
+    carried by just those top 15 zones -- the fact that demand is spatially
+    concentrated, which is what justifies optimising station placement rather
+    than spacing stations evenly.
+\end{description}
+
+\subsection{When load spikes}
+\begin{description}
+  \item[Calls by hour (chart)] Incident count for each of the 24 clock hours,
+    summed over the whole period, alongside the average per day for that hour
+    ($\text{avg\_per\_day}_h = \text{incidents}_h / \#\text{days}$).
+  \item[Calls by weekday (chart)] Incident count for each of the 7 weekdays,
+    summed over the whole period.
+  \item[Hour $\times$ weekday heatmap (expander)] A 7-row $\times$ 24-column
+    grid of incident counts, showing which specific hour/weekday combinations
+    carry the true load peaks (a pattern the two one-dimensional charts above
+    can hide, since a weekday peak and an hour peak need not coincide).
+  \item[Call-type mix (expander)] The 15 most frequent call-type labels in the
+    raw feed, each with its share of total incidents.
+  \item[Daily trend (expander)] Incident count per calendar day across the
+    period. The final day is flagged as \textbf{partial} and marked
+    accordingly on the chart whenever the data stops before 23:00 local time
+    that day, since the 911 feed is harvested live and the last day is usually
+    cut off mid-way and not comparable to a full day.
+\end{description}
+
+\subsection{Demand weights fed into both optimisations}
+\begin{description}
+  \item[Weight per zone (table)] Every zone's raw incident count
+    (\textbf{Incidents}) and its weight relative to the single busiest zone
+    (\textbf{Weight}):
+    \[
+      \text{weight\_pct}_j \;=\; 100\cdot\frac{d_j}{\max_k d_k}
+    \]
+    This is the literal weight the covering model's demand-coverage
+    constraints and objective use -- the quantity ``\% of demand covered''
+    is always measured against, elsewhere in the app.
+  \item[Demand across the city (map)] One dot per demand zone, placed at its
+    \textbf{demand point} -- the mean coordinate of every real incident in
+    that zone, \emph{not} the ZIP polygon's geometric centroid, so the
+    candidate site sits where the calls actually happen:
+    \[
+      (\bar\phi_j,\bar\lambda_j) \;=\; \frac{1}{n_j}\sum_{k\in j}(\phi_k,\lambda_k)
+    \]
+    Shading encodes the zone's incident count.
+\end{description}
+
+\section{Site Scoring Tab (AHP)}
+This tab runs Saaty's Analytic Hierarchy Process to rank candidate station
+sites on three criteria, using pairwise judgements collected from each team
+member.
+
+\subsection{Pairwise judgements}
+\begin{description}
+  \item[Team members] A count, 1--8, of how many independent judgement sets
+    to combine (default: the number of team members on record). Each member
+    fills the comparison table independently; their matrices are aggregated
+    into one set of weights before anything downstream uses them.
+  \item[Saaty's 1--9 scale] The fixed intensity scale every pairwise judgement
+    below is made on: 1 = equal importance, 3 = moderate, 5 = strong, 7 = very
+    strong, 9 = extreme, with 2/4/6/8 as intermediate steps. A reciprocal value
+    (e.g.\ 1/3, 1/5) expresses the same intensity in the opposite direction.
+  \item[Pairwise comparison sliders] One slider per pair of the three criteria
+    (\emph{Incident Density} vs \emph{Equity Gap}, \emph{Incident Density} vs
+    \emph{Coverage Potential}, \emph{Equity Gap} vs \emph{Coverage
+    Potential}), per member. The three criteria themselves:
+    \begin{description}
+      \item[Incident Density] Number of emergencies in the candidate zone.
+      \item[Equity Gap] Distance (km) to the nearest station Seattle already
+        operates; farther is read as higher unmet need.
+      \item[Coverage Potential] How much total demand is reachable from that
+        zone within the current response-time limit.
+    \end{description}
+    Each slider is read back underneath as a plain-English sentence (e.g.\
+    ``Incident Density is moderately more important than Equity Gap''), so the
+    number on the track is never the only account of what was chosen.
+  \item[Reciprocal comparison matrix] What each member's slider values are
+    assembled into, one $3\times3$ matrix $A^{(k)}$ per member $k$:
+    \[
+      A^{(k)}_{ij} = a^{(k)}_{ij}, \qquad A^{(k)}_{ji} = \frac{1}{a^{(k)}_{ij}},
+      \qquad A^{(k)}_{ii} = 1
+    \]
+\end{description}
+
+\subsection{Judgement consistency}
+\begin{description}
+  \item[Aggregated comparison matrix] The four (or $n$) members' matrices
+    combined element-wise by geometric mean -- the only averaging rule that
+    keeps the result reciprocal, so that if the members' views of $i$ vs $j$
+    average to 3, their view of $j$ vs $i$ automatically averages to $1/3$:
+    \[
+      \bar A_{ij} \;=\; \left(\prod_{k=1}^{n} A^{(k)}_{ij}\right)^{1/n}
+    \]
+  \item[AHP weights (chart)] The priority vector $w$ actually used everywhere
+    downstream: the principal right eigenvector of $\bar A$, normalised to
+    sum to 1.
+    \[
+      \bar A\,w = \lambda_{\max}\,w, \qquad
+      w \;\leftarrow\; \frac{|w|}{\sum_c |w_c|}
+    \]
+  \item[$\lambda_{\max}$] The principal eigenvalue of the aggregated matrix,
+    computed as $\lambda_{\max} = \text{mean}_i\big((\bar A w)_i / w_i\big)$. A
+    perfectly consistent $n\times n$ matrix has $\lambda_{\max} = n$ exactly.
+  \item[CI (Consistency Index)] How far $\lambda_{\max}$ departs from the
+    perfectly-consistent value $n$:
+    \[
+      \mathrm{CI} \;=\; \frac{\lambda_{\max} - n}{n - 1}
+    \]
+  \item[RI (Random Index)] Saaty's published average CI of a large sample of
+    \emph{randomly generated} reciprocal matrices of the same order $n$; the
+    yardstick CI is judged against. For $n=3$, $\mathrm{RI}_3 = 0.58$.
+  \item[CR (Consistency Ratio)] The normalised measure actually used to accept
+    or reject a set of judgements:
+    \[
+      \mathrm{CR} \;=\; \frac{\mathrm{CI}}{\mathrm{RI}_n}
+    \]
+    Judgements are considered logically consistent, and the derived weights
+    trustworthy, when $\mathrm{CR} < 0.10$; the app shows a green confirmation
+    message in that case and a red warning otherwise, naming the measured
+    value against the 0.10 cutoff.
+  \item[Per-member consistency (table)] The same CR computed on each member's
+    own matrix in isolation, with a pass/fail \textbf{Passes} flag
+    ($\mathrm{CR} < 0.10$). This answers a question the aggregate CR cannot: a
+    geometric mean of several individually-inconsistent matrices can still
+    come out looking consistent, so each member's own figure is shown
+    separately.
+\end{description}
+
+\subsection{Candidate sites ranked by priority}
+\begin{description}
+  \item[Max-normalisation] Before combining, every criterion's raw values are
+    scaled by their own column maximum, which is valid because all three
+    criteria are \emph{benefit} measures on a ratio scale with a true zero:
+    \[
+      \hat x_{ic} \;=\; \frac{x_{ic}}{\max_i x_{ic}}
+    \]
+  \item[Priority score] The ranking chart and the \textbf{Priority} column in
+    the table, a weighted sum of the three normalised criteria using the AHP
+    weights $w$ derived above:
+    \[
+      s_i \;=\; \sum_{c} w_c\,\hat x_{ic}
+    \]
+  \item[Candidate ranking (table)] One row per candidate zone, sorted by
+    priority score descending, showing the raw \textbf{Incidents}
+    (Incident Density), \textbf{Nearest stn} distance in km (Equity Gap),
+    \textbf{In reach} incident count (Coverage Potential, i.e.\ demand
+    reachable from this zone within the response-time limit) and the final
+    \textbf{Priority} score.
+\end{description}
+This priority score does not by itself decide how many stations open; see
+the tie-break description under \S\ref{sec:placement}.
+
+\section{Station Placement Tab}
+\label{sec:placement}
+
+\subsection{Set up the run}
+\begin{description}
+  \item[Candidate sites considered (top-N by priority)] A slider limiting the
+    covering model's candidate pool to the top $N$ zones by AHP priority
+    score, so a user can study the effect of a smaller candidate set. Defaults
+    to using every material zone.
+  \item[Objective] A two-way choice of which covering model to solve:
+    \begin{description}
+      \item[Mode A -- minimum stations for full coverage] (Set Covering,
+        LSCP). Opens the fewest possible stations such that every demand zone
+        is within the response-time limit.
+      \item[Mode B -- best coverage for a fixed budget] (Maximal Covering,
+        MCLP). Opens exactly a chosen number of stations, $P$, to cover as
+        much demand as possible within the limit.
+    \end{description}
+  \item[Station budget $P$] Appears only under Mode B. The exact number of
+    stations the model is allowed to open, 1 up to the candidate-pool size
+    (capped at 30 in the slider).
+  \item[Mode A formulation] The integer program actually solved, including a
+    deliberately tiny AHP-derived tie-break term:
+    \[
+      \min \; \sum_i y_i \;+\; \varepsilon\sum_i \text{pref}_i\, y_i
+      \quad\text{s.t.}\quad
+      \sum_{i \in N(j)} y_i \ge 1 \;\; \forall j, \qquad y_i \in \{0,1\}
+    \]
+    where $N(j) = \{i : t_{ij} \le \text{limit}\}$ is the set of candidates
+    that can reach zone $j$ in time, $\varepsilon = 0.5 / n_{\text{candidates}}$
+    (small enough that it can never justify opening an extra station), and
+    \[
+      \text{pref}_i \;=\; \frac{\max_k s_k - s_i}{\max_k s_k - \min_k s_k}
+    \]
+    so that among several equally-small station sets the solver prefers the
+    one favouring higher-priority sites from the AHP ranking.
+  \item[Mode B formulation]
+    \[
+      \max \; \sum_j d_j\, z_j
+      \quad\text{s.t.}\quad
+      z_j \le \sum_{i \in N(j)} y_i \;\;\forall j, \qquad
+      \sum_i y_i = P, \qquad y_i, z_j \in \{0,1\}
+    \]
+    where $d_j$ is zone $j$'s demand, so the objective maximises people
+    reached rather than area or zone count.
+\end{description}
+
+\subsection{Result}
+\begin{description}
+  \item[Stations opened] The number of candidate sites the solver actually
+    selected ($\sum_i y_i$).
+  \item[Demand covered] Share of total period demand served by at least one
+    opened station within the limit:
+    \[
+      \text{demand\_pct} \;=\; 100\cdot\frac{\sum_{j:\,\text{covered}} d_j}{\sum_j d_j}
+    \]
+  \item[Zones covered] Count of demand zones reached by at least one opened
+    station within the limit, out of the total number of zones.
+  \item[Solver status] The underlying ILP solver's own verdict, almost always
+    \textbf{Optimal} on this problem size; other possible values are
+    \textbf{Infeasible}, \textbf{Unbounded} or \textbf{Not Solved}.
+  \item[Solve time] Wall-clock time the ILP solver spent on this run, shown in
+    milliseconds below one second and in seconds above it.
+  \item[Uncoverable-zones warning] Lists any zone that \emph{no} candidate
+    site -- not just the opened ones -- can reach within the limit. Such zones
+    are excluded from the covering constraints (otherwise the model would
+    have no feasible solution at all) and are flagged so the gap is visible
+    rather than silently absorbed.
+  \item[Stations opened (table)] One row per opened station, with
+    \textbf{Zone} (its ZIP) and \textbf{Serves}: the total demand of every
+    zone whose nearest opened station, within the limit, is this one.
+  \item[Per-zone outcome (table)] One row per demand zone: \textbf{Status}
+    (\emph{Covered}/\emph{Not covered}), \textbf{From} (the opened station it
+    is served by, if any) and \textbf{Response} (the resulting travel time in
+    minutes to that nearest opened station).
+  \item[Stations \& coverage (map)] Shaded circles show each opened station's
+    response-time-limit reach; zone dots are green where covered and red
+    where not.
+\end{description}
+
+\subsection{Sensitivity analysis}
+\begin{description}
+  \item[Run both sweeps (button)] Re-solves two families of covering problems
+    over the current candidate pool: a \textbf{threshold sweep} (Mode A
+    re-solved at every limit in $\{5, 8, 10\}$ minutes) and a \textbf{budget
+    curve} (Mode B re-solved at every station budget from 1 up to a few past
+    the current plan's station count, at the limit set in the sidebar).
+  \item[Threshold-sweep table/chart] For each response-time limit: the
+    minimum \textbf{Stations needed}, resulting \textbf{Demand covered} and
+    \textbf{Zones covered}. Shows how tightening or relaxing the promise
+    changes the station count a full-coverage plan requires.
+  \item[Marginal coverage curve] Demand covered as a function of station
+    budget $P$ under Mode B, plus the marginal gain of each additional
+    station:
+    \[
+      \Delta_P \;=\; \text{demand\_pct}(P) - \text{demand\_pct}(P-1)
+    \]
+    Shows the diminishing return that justifies the budget-constrained (Mode
+    B) framing: the first handful of stations buy most of the coverage.
+\end{description}
+
+\subsection{Robustness of the station count}
+\begin{description}
+  \item[Assumption grid] The Mode A problem re-solved at all 16 combinations
+    of speed $v \in \{30, 35, 40, 45\}$ km/h and circuity
+    $\kappa \in \{1.3, 1.4, 1.5, 1.6\}$, holding the candidate pool, AHP
+    tie-break and limit fixed, so any spread in the answer is attributable to
+    the travel-model assumption alone. Each grid cell also reports its
+    implied straight-line reach, the same formula as the sidebar's
+    \emph{Implied reach} caption:
+    \[
+      \text{reach\_km} \;=\; \max(\text{limit} - \tau,\,0)\cdot\frac{v}{60\,\kappa}
+    \]
+  \item[Stations needed (lo--hi)] The minimum and maximum station count found
+    across all 16 grid cells at the current limit -- the honest range the
+    headline number should be read within, rather than a single value.
+  \item[Worst coverage] The lowest demand-covered percentage found in any
+    single grid cell.
+  \item[Still under Seattle's] How many fewer stations even the most
+    pessimistic grid cell needs than the number of stations Seattle actually
+    operates.
+  \item[Verdict message] A green confirmation when every grid cell still
+    needs fewer stations than Seattle's real network (meaning the placement
+    advantage survives every tested assumption), or a red warning when the
+    most pessimistic cell meets or exceeds Seattle's real count.
+\end{description}
+
+\subsection{Benchmark vs.\ real stations}
+\begin{description}
+  \item[Benchmark (button)] Scores both the optimised plan and the real
+    Seattle Fire station network on identical travel assumptions, at every
+    limit in $\{5, 8, 10\}$ minutes, using each network's own fixed set of
+    stations (\texttt{evaluate\_fixed\_stations} for Seattle's, the Mode A
+    solve for the optimised plan).
+  \item[Comparison chart/table] \textbf{Stations}, \textbf{Demand covered} and
+    \textbf{Zones covered} for \emph{Optimised placement} side by side with
+    \emph{Seattle's real stations}, at each limit.
+  \item[Headline ratio] At the sidebar's current limit, the real network's
+    station count divided by the optimised plan's station count -- how many
+    times fewer sites the optimised plan needs for the same coverage. The
+    accompanying caption notes two caveats: Seattle's stations are
+    multi-mission fire stations (also carrying suppression, hazmat and
+    technical rescue), so the comparison is not perfectly like-for-like; and
+    the optimised count is itself a function of the current travel
+    assumptions (see \emph{Robustness}, above).
+\end{description}
+
+\section{Dispatch Tab}
+This tab requires a solved covering result from \emph{Station Placement};
+its opened stations become the ambulance bases dispatched from here.
+
+\subsection{Choose the scenario}
+\begin{description}
+  \item[Peak hour of simultaneous emergencies] A dropdown of the 25 busiest
+    individual clock hours in the selected period (by real incident count),
+    used as the demand scenario for the dispatch model.
+  \item[Busiest hours (table)] Those same candidate hours, with their
+    timestamp, weekday and incident count.
+  \item[Ready units per station] A slider, 1--12, for how many ambulances are
+    presumed ready at each opened station. The resulting fleet size and the
+    number of units that \emph{would} be needed to field every call that hour
+    are both shown:
+    \[
+      \text{fleet} \;=\; \text{units}\times n_{\text{stations}}, \qquad
+      \text{need} \;=\; \left\lceil \frac{n_{\text{calls}}}{n_{\text{stations}}} \right\rceil
+    \]
+    Defaulting the slider to \texttt{need} (capped at 12) avoids starving the
+    model with far fewer ambulances than the hour actually requires.
+\end{description}
+
+\subsection{Scenario metrics}
+\begin{description}
+  \item[Incidents this hour] Real call count inside the chosen clock hour.
+  \item[Ambulances available] Fleet size, $\text{units}\times n_{\text{stations}}$.
+  \item[Capacity gap] Calls with no ambulance left to send \emph{before} the
+    model is even solved: $\max(n_{\text{calls}} - n_{\text{ambulances}}, 0)$.
+  \item[Response-time limit] The limit currently set in the sidebar, used
+    here only to judge the dispatch results against -- deliberately
+    independent of the (possibly different) limit the stations were
+    \emph{placed} under in the Station Placement tab, so ``place at 8
+    minutes, judge against 6'' is a question the app can actually answer.
+\end{description}
+
+\subsection{Dispatch result}
+\begin{description}
+  \item[Assignment LP] The model solved on pressing \emph{Solve the
+    assignment model}: minimise total travel time across all ambulance/
+    incident pairings, one ambulance per incident:
+    \[
+      \min \sum_{i,j} c_{ij}\,x_{ij}
+      \quad\text{s.t.}\quad
+      \sum_i x_{ij} = 1 \;\;\forall j, \qquad
+      \sum_j x_{ij} \le 1 \;\;\forall i, \qquad
+      x_{ij} \ge 0
+    \]
+    where $c_{ij}$ is the travel time from ambulance base $i$ to incident
+    $j$ (the same travel-time formula as the sidebar). The constraint matrix
+    is totally unimodular, so this LP relaxation is already guaranteed an
+    integral optimum -- no binary variables are needed. Unequal ambulance and
+    incident counts are first balanced by padding the cost matrix with
+    zero-cost dummy rows (fewer ambulances than calls: dummy ambulances
+    absorb the calls that cannot be served) or dummy columns (more ambulances
+    than calls: dummy incidents absorb idle units).
+  \item[Total travel time] Sum of travel time over every call this plan
+    actually served.
+  \item[Mean response] Average travel time over served calls.
+  \item[Worst response] Maximum travel time over served calls.
+  \item[Served / unserved] Count of calls assigned a real ambulance versus
+    calls left with none (shown in the dispatch plan table as
+    \emph{Unserved}).
+  \item[Idle units] Ambulances assigned no call this hour:
+    $\max(n_{\text{ambulances}} - n_{\text{served}},\,0)$.
+  \item[Dispatch plan (table)] One row per incident: the responding
+    \textbf{Unit} (or \emph{Unserved} if none was available), the base's
+    \textbf{From} zone, and the resulting \textbf{Response} time (an em dash
+    where there is none).
+\end{description}
+
+\subsection{Benchmark against greedy dispatch}
+\begin{description}
+  \item[Greedy nearest-free-unit baseline] What dispatch looks like without
+    optimisation: calls are handled in arrival order, each sent the nearest
+    still-free unit.
+    \[
+      i^*_j \;=\; \arg\min_{i \in \text{free}} c_{ij}, \qquad
+      \text{free} \;\leftarrow\; \text{free}\setminus\{i^*_j\}
+    \]
+    This is the benchmark the optimal assignment is meant to beat: a locally
+    nearest choice can strand a later call with a very long drive.
+  \item[Like-for-like restriction] Both the optimal LP total and the greedy
+    total are computed over the \emph{same} $k = \min(n_{\text{ambulances}},
+    n_{\text{incidents}})$ calls, in arrival order -- the workload a
+    dispatcher actually has to clear. Without this restriction, an
+    unconstrained LP would quietly serve only the cheapest calls when the
+    fleet is too small, overstating its advantage; greedy has no such choice,
+    since it must take calls as they arrive.
+  \item[Saved vs.\ nearest-unit-first] The routing advantage of the optimal
+    matching over the greedy baseline, on that same restricted workload:
+    \[
+      \text{improvement\_pct} \;=\; 100\cdot
+      \frac{\text{greedy\_total} - \text{optimal\_total}}{\text{greedy\_total}}
+    \]
+  \item[Response distribution (chart)] Histogram of response times across
+    served calls this hour, against the current response-time limit.
+  \item[Dispatch comparison (chart)] Total travel time, optimal LP vs.\
+    greedy, over the same $k$ calls.
+\end{description}
+
+\subsection{Supporting detail}
+\begin{description}
+  \item[Cost matrix (expander)] The real ambulance-by-incident travel-time
+    matrix in minutes, and, whenever the counts were unequal, the
+    \textbf{Balanced matrix} padded with zero-cost dummy ambulances or dummy
+    incidents to make the assignment problem square.
+  \item[Dispatch plan (map)] A line from each ambulance's base to the
+    incident it was sent to; red dots mark calls no unit could reach.
+\end{description}
+
+\end{document}

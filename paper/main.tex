@@ -75,8 +75,8 @@ complete throughout. The assignment LP reduces total fleet travel time by
 by 8.8\,\% at the five-unit fleet that can field the whole peak hour, when both
 methods are given an identical workload. We show that the na\"ive version of that comparison overstates the gain
 roughly sevenfold, and report the corrected figure. Every model is verified
-against an independent optimum --- brute-force enumeration for the covering
-programs, the Hungarian algorithm for the assignment program --- and against
+against an independent optimum (brute-force enumeration for the covering
+programs, the Hungarian algorithm for the assignment program) and against
 randomised instances. The system is delivered as an interactive Streamlit
 application in which every assumption is adjustable and every model re-solves in
 under a second.
@@ -92,7 +92,7 @@ decision support systems
 \section{Introduction}
 % ===========================================================================
 
-\IEEEPARstart{I}{n} a cardiac arrest, survival falls by roughly ten percentage
+In a cardiac arrest, survival falls by roughly ten percentage
 points for every minute that passes before defibrillation. Emergency medical
 services (EMS) are therefore among the oldest and most studied applications of
 operations research, and the domain in which a better model translates most
@@ -102,9 +102,9 @@ Two operational decisions control how quickly an ambulance reaches a patient,
 and both are optimisable:
 
 \begin{itemize}
-  \item \textbf{Q1 --- Where should ambulances wait?} Station placement
+  \item \textbf{Q1. Where should ambulances wait?} Station placement
     determines how much of the city lies within a given response-time radius.
-  \item \textbf{Q2 --- Which unit should be sent?} When several emergencies are
+  \item \textbf{Q2. Which unit should be sent?} When several emergencies are
     live at once, the matching of units to calls determines everyone's wait.
 \end{itemize}
 
@@ -171,8 +171,8 @@ station location specifically.
 The assignment problem has been solvable in polynomial time since
 Kuhn's Hungarian method~\cite{kuhn1955}. Its linear-programming relaxation is
 integral because the constraint matrix is totally
-unimodular~\cite{hoffman1956} --- a property we exploit to state dispatch as an
-LP rather than a binary program, and which we use as a correctness check.
+unimodular~\cite{hoffman1956}. We use that property to state dispatch as an
+LP rather than a binary program, and as a correctness check.
 Gendreau \textit{et al.}~\cite{gendreau1997} address the dynamic relocation
 variant with tabu search.
 
@@ -241,7 +241,7 @@ EMS calls are then isolated by whole-word pattern matching on the call type
 (\textit{aid}, \textit{medic}, \textit{medical}, \textit{AMR},
 \textit{nurseline}, \textit{triaged}, \textit{low acuity}, \textit{overdose},
 and similar). A second, opt-in tier adds incidents that generate patients but
-are typed by their cause --- collisions, rescues, violence --- so that the
+are typed by their cause (collisions, rescues, violence), so that the
 sensitivity of every result to the definition of ``EMS'' can be inspected rather
 than assumed. All results in this paper use the core tier.
 
@@ -279,7 +279,7 @@ rather than of the window length.
 \textbf{Window} & \textbf{Incidents} & \textbf{Zones} & \textbf{Stations}
 & \textbf{Sites shared} \\
 \midrule
-1 year    &    79{,}152 & 28 & 7 & --- \\
+1 year    &    79{,}152 & 28 & 7 & -- \\
 2 years   &   173{,}371 & 28 & 7 & 7/7 \\
 3 years   &   270{,}224 & 28 & 7 & 7/7 \\
 5 years   &   452{,}309 & 28 & 7 & 7/7 \\
@@ -294,7 +294,7 @@ with the twelve-month plan.
 
 Each ZIP zone becomes a demand point whose weight is its incident count and
 whose location is the \emph{mean incident coordinate} rather than the polygon
-centroid --- placing the candidate site where the calls actually are.
+centroid, placing the candidate site where the calls actually are.
 
 \subsection{The materiality floor}
 
@@ -315,8 +315,8 @@ is reported as such rather than buried in preprocessing.
 
 Fig.~\ref{fig:demand} shows that demand is strongly concentrated: the busiest
 zone, ZIP 98104, alone carries 11.9\,\% of all EMS incidents, and 16 of 39 zones
-account for 80\,\% of them. Fig.~\ref{fig:temporal} shows the temporal profile
---- a pronounced midday peak at 13:00 and a shallow weekday pattern. Demand is
+account for 80\,\% of them. Fig.~\ref{fig:temporal} shows the temporal profile:
+a pronounced midday peak at 13:00 and a shallow weekday pattern. Demand is
 therefore far more concentrated in space than in time, which is what makes
 station placement the higher-leverage of the two decisions.
 
@@ -360,11 +360,11 @@ $\tau = 1$\,min. All three are exposed in the application and every model
 re-solves against the current values, so no result in this paper depends on an
 unexaminable constant.
 
-\subsection{Step 2 --- AHP site scoring}
+\subsection{Step 2. AHP site scoring}
 
 Three competing benefit criteria are defined per candidate zone: \emph{Incident
 Density} (calls in the zone), \emph{Equity Gap} (kilometres to the nearest
-station Seattle already operates --- farther means worse served), and
+station Seattle already operates, where farther means worse served), and
 \emph{Coverage Potential} (demand reachable from the zone within the limit).
 
 Each of the four team members independently compared the three criteria
@@ -390,20 +390,20 @@ and consistency is checked by
 
 with $\mathrm{RI}_3 = 0.58$ and the usual acceptance rule $\mathrm{CR} < 0.1$.
 
-Each zone's criterion values are max-normalised --- appropriate because all
-three are benefit criteria measured on ratio scales with a true zero --- and
+Each zone's criterion values are max-normalised, which is appropriate because
+all three are benefit criteria measured on ratio scales with a true zero, and
 combined into a priority score $s_i = \sum_c w_c \, \hat{x}_{ic}$. This score
 orders the candidate list the covering model receives, and additionally enters
 the set-covering objective as an infinitesimal tie-break, so that among equally
 sized optimal solutions the model prefers the one on higher-priority sites.
 
-\subsection{Step 3 --- Covering models (ILP)}
+\subsection{Step 3. Covering models (ILP)}
 
 Let $I$ be candidate sites, $J$ demand zones, $d_j$ the demand of zone $j$, and
 $N(j) = \{\, i \in I : t_{ij} \le T \,\}$ the sites that can reach $j$ within
 limit $T$. Let $y_i \in \{0,1\}$ open site $i$.
 
-\textbf{Mode A --- Set covering.} The fewest stations that leave no zone
+\textbf{Mode A. Set covering.} The fewest stations that leave no zone
 uncovered:
 \begin{align}
   \min_{y} \quad & \sum_{i \in I} y_i \label{eq:scp} \\
@@ -412,7 +412,7 @@ uncovered:
   & y_i \in \{0,1\} && \forall i \in I \nonumber
 \end{align}
 
-\textbf{Mode B --- Maximal covering.} With the budget fixed at $P$, the greatest
+\textbf{Mode B. Maximal covering.} With the budget fixed at $P$, the greatest
 demand served, where $z_j \in \{0,1\}$ indicates that zone $j$ is covered:
 \begin{align}
   \max_{y,z} \quad & \sum_{j \in J} d_j z_j \label{eq:mclp} \\
@@ -427,7 +427,7 @@ cover; they are reported separately and excluded from the constraint set, so
 that an unreachable outlier cannot render the whole program infeasible and
 suppress an otherwise useful answer.
 
-\subsection{Step 4 --- Dispatch assignment (LP)}
+\subsection{Step 4. Dispatch assignment (LP)}
 
 For a chosen peak hour, let $c_{ij}$ be the travel time from ambulance $i$ to
 incident $j$ under \eqref{eq:traveltime}, and $x_{ij}$ the fraction of unit $i$
@@ -440,8 +440,8 @@ assigned to call $j$:
 \end{align}
 
 The constraint matrix of \eqref{eq:ap} is totally unimodular~\cite{hoffman1956},
-so the LP relaxation has an integral optimum and no binary variables are needed
---- which is why dispatch is stated here as an LP while covering requires an
+so the LP relaxation has an integral optimum and no binary variables are needed.
+This is why dispatch is stated here as an LP while covering requires an
 ILP. Unequal unit and call counts are handled in the transportation-problem
 manner, by padding the cost matrix with zero-cost dummy rows or columns so that
 the instance is square, balanced and always feasible.
@@ -462,12 +462,12 @@ objective against nearest-unit-first greedy assignment on the same peak hour.
 This comparison is invalid, and we report it because the invalid version is the
 one most likely to be produced by default.
 
-A peak hour carries more calls than ready units --- 30 calls against 7 units in
+A peak hour carries more calls than ready units: 30 calls against 7 units in
 our instance. Under \eqref{eq:ap} an unserved call contributes nothing to the
 objective. The LP is therefore free to answer only the seven \emph{nearest}
 calls and leave the awkward ones unanswered, while greedy processes calls in
 arrival order and must take whatever comes. Comparing the two totals then scores
-\emph{which calls each method chose to answer} --- that is, triage --- rather
+\emph{which calls each method chose to answer} (that is, triage) rather
 than how well it routed, and inflates the apparent advantage from 8.1\,\% to
 62\,\%.
 
@@ -523,7 +523,7 @@ of them re-solves every downstream model.
 
 The models are expressed with PuLP~\cite{pulp}. PuLP bundles a CBC binary built
 for x86\_64 only, so on Apple Silicon without Rosetta every solve fails with
-\textit{``Bad CPU type in executable''} --- and PuLP reports the broken binary as
+\textit{``Bad CPU type in executable''}. PuLP reports the broken binary as
 available, because only the exec fails. The configuration layer therefore probes
 candidate solvers by \emph{actually solving a trivial LP} and uses the first that
 runs: HiGHS~\cite{highs}, then a system CBC on \texttt{PATH}, then PuLP's
@@ -683,7 +683,7 @@ directional claim rather than the point estimate as the result.
 
 One bias this grid cannot see is worth naming here. Scaling speed or circuity
 scales every distance together, so no cell of it disturbs the assumption that
-travel inside a zone is free. That assumption is worth about 1.9 minutes on the
+travel inside a zone is free. That assumption is worth about 1.8 minutes on the
 average call and five extra stations at eight minutes; it is quantified in
 Section~\ref{sec:limits}.
 
@@ -742,7 +742,7 @@ comparison of \S\ref{sec:honest}, also shown in Fig.~\ref{fig:dispatch}.
 
 The gain is not monotone in fleet size: 8.1\,\%, 4.0\,\% and 8.8\,\% at
 seven, fourteen and thirty-five units. Each row is scored on a different
-workload --- the first $k=\min(\text{units},\,\text{calls})$ arrivals --- so the
+workload (the first $k=\min(\text{units},\,\text{calls})$ arrivals), so the
 three are not points on a curve but three separate instances, and which
 particular calls fall inside $k$ matters more than the fleet size itself. We
 therefore report the margin per configuration rather than as a single figure,
@@ -772,7 +772,7 @@ The second establishes \emph{optimality} against independent oracles:
     against exhaustive enumeration of every possible station subset (25
     instances each);
   \item the AHP weights are checked against the largest-modulus eigenvector
-    computed independently, over 200 random reciprocal matrices --- the test
+    computed independently, over 200 random reciprocal matrices, the test
     that confirms the consistency machinery is live despite the zero CRs in
     Table~\ref{tab:ahp};
   \item the dispatch LP is cross-checked against an independent Hungarian
@@ -782,7 +782,7 @@ The second establishes \emph{optimality} against independent oracles:
 
 A third suite drives the application headlessly and asserts that every pipeline
 stage has its tab, every headline figure is on the page, and all three maps
-build --- so the parts of the deliverable that are looked at rather than computed
+build, so the parts of the deliverable that are looked at rather than computed
 cannot silently regress.
 
 % ===========================================================================
@@ -832,7 +832,8 @@ count.
 \subsection{Routing gains are real but modest}
 
 The 8.1\,\% improvement from optimal dispatch is a genuine gain available at
-zero capital cost --- it requires only a different decision rule at the console.
+zero capital cost, since it requires only a different decision rule at the
+console.
 But it is an order of magnitude smaller than the apparent 62\,\% that the
 uncontrolled comparison reports, and we regard the discipline of
 \S\ref{sec:honest} as among the more transferable results here: in any
@@ -852,8 +853,8 @@ We state these explicitly rather than leaving them to be discovered.
     modelled at 28 zone centroids, so a station is charged turnout time alone
     to reach the zone it occupies. Measured against the calls themselves, the
     demand-weighted mean distance from an incident to its own zone centroid is
-    \textbf{1.04\,km}, about \textbf{1.9 minutes} at the default constants, and
-    1.73\,km at the ninetieth percentile. Charging that within-zone travel
+    \textbf{1.04\,km}, about \textbf{1.8 minutes} at the default constants.
+    Charging that within-zone travel
     raises the eight-minute requirement from \textbf{seven stations to twelve}
     (five minutes: sixteen to twenty-four; ten minutes: five to six).
     \texttt{coverage\_matrix(within\_zone=True)} implements it and the
